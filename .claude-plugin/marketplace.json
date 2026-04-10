@@ -1,0 +1,17 @@
+{
+  "name": "claude-skills",
+  "version": "1.0.0",
+  "owner": "David Fava",
+  "plugins": [
+    {
+      "name": "cross-model-review",
+      "description": "Cross-model code review and debugging skills using Claude + OpenAI Codex",
+      "skills": [
+        "skills/codex-assist",
+        "skills/cross-review-pr",
+        "skills/code-reviewer"
+      ],
+      "strict": false
+    }
+  ]
+}
