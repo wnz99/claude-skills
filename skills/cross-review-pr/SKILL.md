@@ -1,24 +1,27 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a Pull Request. Runs Claude's code-reviewer on the PR, then sends findings to Codex for independent validation and its own review. Produces a unified report with confirmed issues, false-positive filtering, and a confidence score. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', or wants both Claude and Codex to review a PR together. Also trigger when the user says 'review PR with Codex', 'get a second opinion on this PR', or 'compare reviews'."
+description: "Cross-model comparative review of a Pull Request. Runs Claude's code-reviewer on the PR, then sends findings to an external LLM (Codex or OpenCode) for independent validation and its own review. Produces a unified report with confirmed issues, false-positive filtering, and a confidence score. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', or wants both Claude and another LLM to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', or 'compare reviews'."
 ---
 
 # Cross-Review PR
 
 Run a comparative code review on a Pull Request using two independent models
-(Claude + OpenAI Codex). The value is in cross-validation: different model
-architectures have different blind spots, so issues found by both models are
-high-confidence, while single-model findings get scrutinized for false positives.
+(Claude + an external LLM via the `llm-assist` skill). The value is in
+cross-validation: different model architectures have different blind spots,
+so issues found by both models are high-confidence, while single-model
+findings get scrutinized for false positives.
 
 ## Prerequisites
 
 - `gh` CLI installed and authenticated (for PR checkout and metadata)
-- `codex` CLI installed and authenticated (`npm i -g @openai/codex`)
+- At least one external LLM CLI installed (see `llm-assist` skill for options)
 - Project has a CLAUDE.md with coding standards (strongly recommended)
 
 ## Arguments
 
 - **PR identifier** (required): PR number (e.g., `47`) or URL (e.g., `https://github.com/org/repo/pull/47`)
+- **--provider PROVIDER** (optional): External LLM to use: `codex` (default),
+  `opencode`, or `all`. Passed through to the `llm-assist` skill.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
 - **--post** (optional): Post the unified report as a PR comment after presenting it.
@@ -76,26 +79,28 @@ title, and description.
 Save the findings in a structured format for the next step. If the code-reviewer
 produces its output as conversation text, parse it into a list of discrete findings.
 
-### Step 3: Codex review + validation (codex-assist skill)
+### Step 3: External LLM review + validation (llm-assist skill)
 
-Use the codex-assist skill in review mode. The codex-assist skill already handles:
+Use the llm-assist skill in review mode with the selected `--provider`.
+The llm-assist skill already handles:
 - CLAUDE.md inclusion in prompts (project coding standards)
-- The "Skill Preference" preamble that tells Codex to use the code-reviewer
-  skill if it's installed — so Codex gets the same structured review methodology
-- `codex exec` invocation, error handling, and temp file cleanup
+- The "Skill Preference" preamble that tells the external LLM to use the
+  code-reviewer skill if installed — same structured review methodology
+- Provider-specific invocation (Codex `exec` or OpenCode `run`), error
+  handling, and temp file cleanup
 - Structured review output schema (P0-P3 severity, file, title, description)
 
 The key addition for cross-review is the validation task. After assembling
-the standard review context per codex-assist's workflow, append Claude's
+the standard review context per llm-assist's workflow, append Claude's
 findings as a second task in the prompt.
 
-#### 3a. Build the prompt file following codex-assist's review template
+#### 3a. Build the prompt file following llm-assist's review template
 
-Follow the codex-assist skill's review mode instructions (see its
+Follow the llm-assist skill's review mode instructions (see its
 `references/prompt-templates.md`). The prompt structure is:
 
-1. **Common Header** — CLAUDE.md project conventions (mandatory per codex-assist)
-2. **Skill Preference** — code-reviewer detection preamble (from codex-assist)
+1. **Common Header** — CLAUDE.md project conventions (mandatory per llm-assist)
+2. **Skill Preference** — code-reviewer detection preamble (from llm-assist)
 3. **Review Target** — the PR diff
 4. **Focus** — user-specified or general
 
@@ -127,44 +132,45 @@ For each Claude finding:
 - reasoning: <your explanation>
 ```
 
-#### 3b. Run Codex via codex-assist's invocation pattern
+#### 3b. Run via llm-assist's invocation pattern
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-codex-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-codex-result-XXXXXX)
+PROMPT_FILE=$(mktemp /tmp/cross-review-llm-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-llm-result-XXXXXX)
 
 # Write assembled prompt to PROMPT_FILE (structure from 3a above)
 
-codex exec \
-  -s read-only \
-  --ephemeral \
-  -o "$OUTPUT_FILE" \
-  - < "$PROMPT_FILE"
+# Codex (default):
+codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
+
+# OpenCode:
+opencode run "Follow the instructions in the attached file" \
+  -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 ```
 
 Set `timeout: 600000` (10 minutes) on the Bash call.
 
 #### 3c. Handle failure gracefully
 
-If Codex fails (not installed, auth error, timeout), present Claude's review
-alone with a note that cross-validation was unavailable. The Claude review
-from code-reviewer is still valuable on its own — the comparative layer
-is additive, not required.
+If the external LLM fails (not installed, auth error, timeout), present
+Claude's review alone with a note that cross-validation was unavailable.
+The Claude review from code-reviewer is still valuable on its own — the
+comparative layer is additive, not required.
 
 ### Step 4: Synthesize unified report
 
-Read Codex's output. Parse it into: independent findings list and validation
-verdicts. Then build the unified report by cross-referencing both reviews.
+Read the external LLM's output. Parse it into: independent findings list and
+validation verdicts. Then build the unified report by cross-referencing both reviews.
 
 Categorize every finding into one of four buckets:
 
 | Category | Meaning | Confidence |
 |----------|---------|------------|
 | **Confirmed** | Both models found the same issue | High |
-| **Claude-only (validated)** | Claude found it, Codex confirmed it | High |
-| **Claude-only (challenged)** | Claude found it, Codex says false positive | Low - needs human judgment |
-| **Claude-only (uncertain)** | Claude found it, Codex is unsure | Medium |
-| **Codex-only** | Codex found it, Claude missed it | Medium |
+| **Claude-only (validated)** | Claude found it, external LLM confirmed it | High |
+| **Claude-only (challenged)** | Claude found it, external LLM says false positive | Low - needs human judgment |
+| **Claude-only (uncertain)** | Claude found it, external LLM is unsure | Medium |
+| **External-only** | External LLM found it, Claude missed it | Medium |
 
 **Matching logic**: Two findings match if they reference the same file AND
 the same logical issue (even if described differently). Use semantic matching,
@@ -177,7 +183,7 @@ validateInput" are the same finding if they point to the same code.
 confirmed_weight = 1.0
 validated_weight = 0.8
 uncertain_weight = 0.5
-codex_only_weight = 0.6
+external_only_weight = 0.6
 challenged_weight = 0.2
 
 score = weighted_sum / total_findings
@@ -195,7 +201,7 @@ Display the unified report to the user:
 # Comparative Review: PR #47
 
 **Claude verdict**: [Approved / Request Changes]
-**Codex verdict**: [Approved / Request Changes]
+**External LLM verdict**: [Approved / Request Changes]
 **Cross-model confidence**: [score as percentage]
 
 ## Confirmed Issues (both models agree)
@@ -204,24 +210,24 @@ Display the unified report to the user:
 ### [severity] [title]
 **File**: [path]:[line]
 **Claude**: [Claude's description]
-**Codex**: [Codex's description]
+**External LLM**: [External LLM's description]
 **Suggested fix**: [best suggestion from either model]
 
-## Claude Findings — Codex Validation
+## Claude Findings — External LLM Validation
 
 [For each Claude-only finding:]
 ### [severity] [title]
 **File**: [path]:[line]
 **Description**: [Claude's finding]
-**Codex verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN]
-**Codex reasoning**: [Codex's explanation]
+**External LLM verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN]
+**External LLM reasoning**: [explanation]
 
-## Codex-Only Findings (Claude missed)
+## External-Only Findings (Claude missed)
 
-[For each Codex-only finding:]
+[For each external-only finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Description**: [Codex's finding]
+**Description**: [External LLM's finding]
 
 ## Summary
 
@@ -282,9 +288,9 @@ git checkout - 2>/dev/null || true
 |---------|----------|
 | `gh` not installed | Tell user to install GitHub CLI |
 | PR not found | Check PR number/URL and repo |
-| `codex` not installed | Present Claude review only, suggest `npm i -g @openai/codex` |
-| Codex timeout | Present Claude review only with note |
-| Codex auth error | Tell user to run `codex login` or set API key |
+| External LLM not installed | Present Claude review only, suggest installing (see `llm-assist` skill) |
+| External LLM timeout | Present Claude review only with note |
+| External LLM auth error | Tell user to check auth config for the selected provider |
 | Diff too large (>5000 lines) | Split by file groups and run sequentially |
 
 ## Tips
@@ -295,5 +301,5 @@ git checkout - 2>/dev/null || true
 - For routine PRs, a single-model review (just `code-reviewer`) is faster
   and usually sufficient.
 - Different models excel at different things: Claude tends to catch architectural
-  issues and convention violations; Codex (GPT) tends to catch edge cases and
+  issues and convention violations; external LLMs often catch edge cases and
   off-by-one errors. Together they cover more ground.

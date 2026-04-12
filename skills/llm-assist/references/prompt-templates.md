@@ -39,14 +39,7 @@ Before starting the review, check if the `code-reviewer` skill is available
 
 - If `code-reviewer` is found: use its workflow to conduct the review instead
   of the generic instructions below. Pass it the diff and any focus area.
-- If `code-reviewer` is NOT found: use the generic review instructions below,
-  and at the END of your review output, append this note:
-
-  ---
-  **Tip:** Install the `code-reviewer` skill for richer, structured reviews:
-  ```
-  codex install https://skills.sh/google-gemini/gemini-cli/code-reviewer
-  ```
+- If `code-reviewer` is NOT found: use the generic review instructions below.
 
 ## Review Target
 
@@ -99,7 +92,7 @@ form your own hypothesis first, then compare.
 [File paths and key code sections]
 
 ## Current Theories (from another investigator)
-[Claude's theories — provided for comparison AFTER Codex forms its own]
+[Claude's theories — provided for comparison AFTER the external LLM forms its own]
 
 ## Instructions
 
