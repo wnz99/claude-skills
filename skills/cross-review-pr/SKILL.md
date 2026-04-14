@@ -1,30 +1,57 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a Pull Request. Runs Claude's code-reviewer on the PR, then sends findings to an external LLM (Codex or OpenCode) for independent validation and its own review. Produces a unified report with confirmed issues, false-positive filtering, and a confidence score. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', or wants both Claude and another LLM to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', or 'compare reviews'."
+description: "Cross-model comparative review of a Pull Request. Runs one LLM as primary reviewer and another as validator. Default: Claude<->Codex. Supports any combination of Claude, Codex, and OpenCode via --from/--to flags. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', or wants two LLMs to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', or 'compare reviews'."
 ---
 
 # Cross-Review PR
 
-Run a comparative code review on a Pull Request using two independent models
-(Claude + an external LLM via the `llm-assist` skill). The value is in
-cross-validation: different model architectures have different blind spots,
-so issues found by both models are high-confidence, while single-model
-findings get scrutinized for false positives.
+Run a comparative code review on a Pull Request using two independent models.
+The value is in cross-validation: different model architectures have different
+blind spots, so issues found by both models are high-confidence, while
+single-model findings get scrutinized for false positives.
+
+## Supported LLMs
+
+| ID | Description | How it runs |
+|----|-------------|-------------|
+| `claude` | Claude (this agent) | Uses the `code-reviewer` skill inline |
+| `codex` | OpenAI Codex CLI | Via `codex exec` (see `llm-assist` skill) |
+| `opencode` | OpenCode CLI | Via `opencode run` (see `llm-assist` skill) |
 
 ## Prerequisites
 
 - `gh` CLI installed and authenticated (for PR checkout and metadata)
-- At least one external LLM CLI installed (see `llm-assist` skill for options)
+- External LLM CLIs installed for whichever models are selected
+  (not needed when both `--from` and `--to` are `claude`)
 - Project has a CLAUDE.md with coding standards (strongly recommended)
 
 ## Arguments
 
-- **PR identifier** (required): PR number (e.g., `47`) or URL (e.g., `https://github.com/org/repo/pull/47`)
-- **--provider PROVIDER** (optional): External LLM to use: `codex` (default),
-  `opencode`, or `all`. Passed through to the `llm-assist` skill.
+- **PR identifier** (required): PR number (e.g., `47`) or URL
+  (e.g., `https://github.com/org/repo/pull/47`)
+- **--from PRIMARY** (optional): LLM that performs the initial review.
+  Values: `claude` (default), `codex`, `opencode`.
+- **--to VALIDATOR** (optional): LLM that validates and adds its own findings.
+  Values: `codex` (default), `claude`, `opencode`.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
-- **--post** (optional): Post the unified report as a PR comment after presenting it.
+- **--post** (optional): Post the unified report as a PR comment after
+  presenting it.
+
+`--from` and `--to` must not be the same LLM.
+
+**Common combinations:**
+
+| Shorthand | Equivalent |
+|-----------|------------|
+| (default) | `--from claude --to codex` |
+| `--from codex` | `--from codex --to claude` |
+| `--from opencode --to codex` | OpenCode reviews, Codex validates |
+
+When only one of `--from`/`--to` is provided, the other defaults to the
+opposite side of the Claude<->Codex pair. If the provided value is `claude`,
+the other defaults to `codex` and vice versa. If the provided value is
+`opencode`, the other defaults to `codex`.
 
 ## Workflow
 
@@ -50,12 +77,17 @@ metadata. Show the user a brief summary before proceeding:
 Comparative review: PR #47 — "feat(27): backpressure pipeline"
 Base: develop <- gsd/phase-27-backpressure-frame-dropping
 Files changed: 12
+Primary reviewer: claude | Validator: codex
 ```
 
 If the diff exceeds 3000 lines, warn the user and suggest using `--focus`
 to narrow scope. Proceed anyway unless they stop you.
 
-### Step 2: Claude review (code-reviewer skill)
+### Step 2: Primary review
+
+Run the primary review using whichever LLM is selected via `--from`.
+
+#### If primary is `claude`
 
 Checkout the PR branch so the code-reviewer has full file access:
 
@@ -63,84 +95,52 @@ Checkout the PR branch so the code-reviewer has full file access:
 gh pr checkout "$PR_NUM"
 ```
 
-Invoke the code-reviewer skill to review the PR changes. The code-reviewer
-skill handles the full review workflow: it reads the diff, analyzes against
-the review pillars (correctness, maintainability, security, edge cases, etc.),
-and produces structured findings.
+Invoke the code-reviewer skill:
 
 ```
 Skill(skill="code-reviewer", args="PR #$PR_NUM")
 ```
 
-After the skill completes, capture Claude's findings. Structure them as a list,
-where each finding has: severity (Critical/Improvement/Nitpick), file, location,
-title, and description.
+After the skill completes, capture Claude's findings as a structured list
+where each finding has: severity (Critical/Improvement/Nitpick), file,
+location, title, and description.
 
-Save the findings in a structured format for the next step. If the code-reviewer
-produces its output as conversation text, parse it into a list of discrete findings.
+#### If primary is an external LLM (`codex` or `opencode`)
 
-### Step 3: External LLM review + validation (llm-assist skill)
-
-Use the llm-assist skill in review mode with the selected `--provider`.
-The llm-assist skill already handles:
-- CLAUDE.md inclusion in prompts (project coding standards)
-- The "Skill Preference" preamble that tells the external LLM to use the
-  code-reviewer skill if installed — same structured review methodology
-- Provider-specific invocation (Codex `exec` or OpenCode `run`), error
-  handling, and temp file cleanup
-- Structured review output schema (P0-P3 severity, file, title, description)
-
-The key addition for cross-review is the validation task. After assembling
-the standard review context per llm-assist's workflow, append Claude's
-findings as a second task in the prompt.
-
-#### 3a. Build the prompt file following llm-assist's review template
-
-Follow the llm-assist skill's review mode instructions (see its
-`references/prompt-templates.md`). The prompt structure is:
+Build a review prompt file following the `llm-assist` skill's review mode
+template. The prompt structure is:
 
 1. **Common Header** — CLAUDE.md project conventions (mandatory per llm-assist)
 2. **Skill Preference** — code-reviewer detection preamble (from llm-assist)
 3. **Review Target** — the PR diff
 4. **Focus** — user-specified or general
 
-Then append the cross-validation task:
-
 ```markdown
-## Additional Task: Validate Another Reviewer's Findings
+## Task: Code Review
 
-After completing your independent review above, evaluate these findings
-from a separate reviewer (Claude). For EACH finding, give your verdict:
+Review the following Pull Request diff. For each issue found, output:
+- severity: Critical / Improvement / Nitpick
+- file: <path>
+- location: <line or range>
+- title: <short title>
+- description: <explanation>
 
-- **CONFIRMED**: You agree this is a real issue. Briefly explain why.
-- **FALSE_POSITIVE**: You believe this is not actually an issue. Explain why.
-- **UNCERTAIN**: You can see arguments both ways. Explain the ambiguity.
+At the end, give an overall verdict: Approved or Request Changes.
 
-Important: Complete your independent review FIRST. Do not let these findings
-influence your own review — they are a separate task.
-
-<claude-findings>
-[Structured list of Claude's findings from Step 2, each with:
-severity, file, title, description]
-</claude-findings>
-
-### Validation Output Format
-
-For each Claude finding:
-- finding: <Claude's finding title>
-- verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
-- reasoning: <your explanation>
+<pr-diff>
+[contents of /tmp/cross-review-pr-diff.patch]
+</pr-diff>
 ```
 
-#### 3b. Run via llm-assist's invocation pattern
+Run via the appropriate CLI:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-llm-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-llm-result-XXXXXX)
+PROMPT_FILE=$(mktemp /tmp/cross-review-primary-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-primary-result-XXXXXX)
 
-# Write assembled prompt to PROMPT_FILE (structure from 3a above)
+# Write assembled prompt to PROMPT_FILE
 
-# Codex (default):
+# Codex:
 codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
 
 # OpenCode:
@@ -150,27 +150,88 @@ opencode run "Follow the instructions in the attached file" \
 
 Set `timeout: 600000` (10 minutes) on the Bash call.
 
-#### 3c. Handle failure gracefully
+Parse the output into the same structured findings format.
 
-If the external LLM fails (not installed, auth error, timeout), present
-Claude's review alone with a note that cross-validation was unavailable.
-The Claude review from code-reviewer is still valuable on its own — the
-comparative layer is additive, not required.
+### Step 3: Validation review
+
+Send the primary review's findings to the validator LLM, along with the
+PR diff for its own independent review.
+
+#### If validator is `claude`
+
+Claude already has the PR diff and branch checked out. Perform the
+validation inline (no external call needed):
+
+1. Do an independent review of the diff, producing your own findings.
+2. For each finding from the primary reviewer, give a verdict:
+   - **CONFIRMED**: Agree this is a real issue. Briefly explain why.
+   - **FALSE_POSITIVE**: Not actually an issue. Explain why.
+   - **UNCERTAIN**: Arguments both ways. Explain the ambiguity.
+
+Important: Complete the independent review FIRST before evaluating the
+primary reviewer's findings, to avoid anchoring bias.
+
+#### If validator is an external LLM (`codex` or `opencode`)
+
+Build the validation prompt following `llm-assist`'s review template,
+then append the cross-validation task:
+
+1. **Common Header** — CLAUDE.md project conventions
+2. **Skill Preference** — code-reviewer detection preamble
+3. **Review Target** — the PR diff
+4. **Focus** — user-specified or general
+5. **Validation Task** (appended):
+
+```markdown
+## Additional Task: Validate Another Reviewer's Findings
+
+After completing your independent review above, evaluate these findings
+from a separate reviewer. For EACH finding, give your verdict:
+
+- **CONFIRMED**: You agree this is a real issue. Briefly explain why.
+- **FALSE_POSITIVE**: You believe this is not actually an issue. Explain why.
+- **UNCERTAIN**: You can see arguments both ways. Explain the ambiguity.
+
+Important: Complete your independent review FIRST. Do not let these findings
+influence your own review — they are a separate task.
+
+<primary-findings>
+[Structured list of primary reviewer's findings, each with:
+severity, file, title, description]
+</primary-findings>
+
+### Validation Output Format
+
+For each finding from the primary reviewer:
+- finding: <primary reviewer's finding title>
+- verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
+- reasoning: <your explanation>
+```
+
+Run via the appropriate CLI (same pattern as Step 2).
+
+#### Handle failure gracefully
+
+If the validator LLM fails (not installed, auth error, timeout), present
+the primary review alone with a note that cross-validation was unavailable.
+The primary review is still valuable on its own — the comparative layer is
+additive, not required.
 
 ### Step 4: Synthesize unified report
 
-Read the external LLM's output. Parse it into: independent findings list and
-validation verdicts. Then build the unified report by cross-referencing both reviews.
+Read both reviews. Parse the validator's output into: independent findings
+list and validation verdicts. Then build the unified report by
+cross-referencing both reviews.
 
-Categorize every finding into one of four buckets:
+Categorize every finding into one of five buckets:
 
 | Category | Meaning | Confidence |
 |----------|---------|------------|
-| **Confirmed** | Both models found the same issue | High |
-| **Claude-only (validated)** | Claude found it, external LLM confirmed it | High |
-| **Claude-only (challenged)** | Claude found it, external LLM says false positive | Low - needs human judgment |
-| **Claude-only (uncertain)** | Claude found it, external LLM is unsure | Medium |
-| **External-only** | External LLM found it, Claude missed it | Medium |
+| **Confirmed** | Both models found the same issue independently | High |
+| **Primary-only (validated)** | Primary found it, validator confirmed it | High |
+| **Primary-only (challenged)** | Primary found it, validator says false positive | Low - needs human judgment |
+| **Primary-only (uncertain)** | Primary found it, validator is unsure | Medium |
+| **Validator-only** | Validator found it, primary missed it | Medium |
 
 **Matching logic**: Two findings match if they reference the same file AND
 the same logical issue (even if described differently). Use semantic matching,
@@ -183,7 +244,7 @@ validateInput" are the same finding if they point to the same code.
 confirmed_weight = 1.0
 validated_weight = 0.8
 uncertain_weight = 0.5
-external_only_weight = 0.6
+validator_only_weight = 0.6
 challenged_weight = 0.2
 
 score = weighted_sum / total_findings
@@ -200,8 +261,9 @@ Display the unified report to the user:
 ```markdown
 # Comparative Review: PR #47
 
-**Claude verdict**: [Approved / Request Changes]
-**External LLM verdict**: [Approved / Request Changes]
+**Primary reviewer**: [claude/codex/opencode] | **Validator**: [claude/codex/opencode]
+**Primary verdict**: [Approved / Request Changes]
+**Validator verdict**: [Approved / Request Changes]
 **Cross-model confidence**: [score as percentage]
 
 ## Confirmed Issues (both models agree)
@@ -209,25 +271,25 @@ Display the unified report to the user:
 [For each confirmed finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Claude**: [Claude's description]
-**External LLM**: [External LLM's description]
+**Primary reviewer**: [description]
+**Validator**: [description]
 **Suggested fix**: [best suggestion from either model]
 
-## Claude Findings — External LLM Validation
+## Primary Findings — Validator Verdicts
 
-[For each Claude-only finding:]
+[For each primary-only finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Description**: [Claude's finding]
-**External LLM verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN]
-**External LLM reasoning**: [explanation]
+**Description**: [primary reviewer's finding]
+**Validator verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN]
+**Validator reasoning**: [explanation]
 
-## External-Only Findings (Claude missed)
+## Validator-Only Findings (primary missed)
 
-[For each external-only finding:]
+[For each validator-only finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Description**: [External LLM's finding]
+**Description**: [validator's finding]
 
 ## Summary
 
@@ -246,12 +308,6 @@ For each fix, add a test that:
 1. Reproduces the invalid input or bad state that triggered the bug
 2. Asserts the corrected behavior
 3. Lives alongside the existing tests for that module
-
-Examples of good regression tests:
-- NaN validation fix → test that NaN input produces the safe default
-- Spurious decrease from 0.0 default → test that the default value is NaN
-- Dead code removal → existing tests updated to use the new API surface
-- New signal/flag → test that setting and clearing the flag works
 
 Present a summary of added tests in the report so the user can verify coverage.
 
@@ -288,8 +344,9 @@ git checkout - 2>/dev/null || true
 |---------|----------|
 | `gh` not installed | Tell user to install GitHub CLI |
 | PR not found | Check PR number/URL and repo |
-| External LLM not installed | Present Claude review only, suggest installing (see `llm-assist` skill) |
-| External LLM timeout | Present Claude review only with note |
+| `--from` and `--to` are the same | Error: primary and validator must be different LLMs |
+| External LLM not installed | If it's the primary, abort with install instructions. If it's the validator, present primary review alone. |
+| External LLM timeout | Same as not installed — degrade gracefully if validator, abort if primary |
 | External LLM auth error | Tell user to check auth config for the selected provider |
 | Diff too large (>5000 lines) | Split by file groups and run sequentially |
 
@@ -301,5 +358,9 @@ git checkout - 2>/dev/null || true
 - For routine PRs, a single-model review (just `code-reviewer`) is faster
   and usually sufficient.
 - Different models excel at different things: Claude tends to catch architectural
-  issues and convention violations; external LLMs often catch edge cases and
+  issues and convention violations; Codex often catches edge cases and
   off-by-one errors. Together they cover more ground.
+- Running `--from codex --to claude` is useful when you want Codex's review
+  validated by Claude's deeper architectural understanding.
+- Running `--from claude --to opencode` gives you a different second opinion
+  if Codex is unavailable.
