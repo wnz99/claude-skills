@@ -12,11 +12,28 @@ single-model findings get scrutinized for false positives.
 
 ## Supported LLMs
 
-| ID | Description | How it runs |
-|----|-------------|-------------|
-| `claude` | Claude (this agent) | Uses the `code-reviewer` skill inline |
-| `codex` | OpenAI Codex CLI | Via `codex exec` (see `llm-assist` skill) |
-| `opencode` | OpenCode CLI | Via `opencode run` (see `llm-assist` skill) |
+| ID | Description |
+|----|-------------|
+| `claude` | Claude Code |
+| `codex` | OpenAI Codex CLI |
+| `opencode` | OpenCode CLI |
+
+## Self-awareness rule
+
+**You (the agent executing this skill) must identify which LLM you are.**
+This determines which roles you handle inline vs. which require shelling
+out to an external CLI.
+
+- If you are **Claude**: `claude` roles run inline (use `code-reviewer` skill
+  or direct analysis). `codex` and `opencode` roles shell out via their CLIs.
+- If you are **Codex**: `codex` roles run inline (do the review/validation
+  yourself). `claude` and `opencode` roles shell out via their CLIs.
+- If you are **OpenCode**: `opencode` roles run inline. `claude` and `codex`
+  roles shell out via their CLIs.
+
+**CRITICAL: Never shell out to yourself.** If `--from` or `--to` matches
+your own identity, you perform that step directly — no CLI subprocess.
+If the role is a *different* LLM, you invoke it via its CLI.
 
 ## Prerequisites
 
@@ -86,26 +103,28 @@ to narrow scope. Proceed anyway unless they stop you.
 ### Step 2: Primary review
 
 Run the primary review using whichever LLM is selected via `--from`.
+Apply the **self-awareness rule**: if `--from` matches your own identity,
+you are the primary reviewer — do it inline. Otherwise, shell out.
 
-#### If primary is `claude`
+#### If primary is YOU (inline)
 
-Checkout the PR branch so the code-reviewer has full file access:
+Checkout the PR branch so you have full file access:
 
 ```bash
 gh pr checkout "$PR_NUM"
 ```
 
-Invoke the code-reviewer skill:
+If you have a `code-reviewer` skill installed, invoke it:
 
 ```
 Skill(skill="code-reviewer", args="PR #$PR_NUM")
 ```
 
-After the skill completes, capture Claude's findings as a structured list
-where each finding has: severity (Critical/Improvement/Nitpick), file,
-location, title, and description.
+Otherwise, review the diff directly. Produce a structured list where each
+finding has: severity (Critical/Improvement/Nitpick), file, location,
+title, and description. End with an overall verdict: Approved or Request Changes.
 
-#### If primary is an external LLM (`codex` or `opencode`)
+#### If primary is a DIFFERENT LLM (external CLI)
 
 Build a review prompt file following the `llm-assist` skill's review mode
 template. The prompt structure is:
@@ -132,7 +151,7 @@ At the end, give an overall verdict: Approved or Request Changes.
 </pr-diff>
 ```
 
-Run via the appropriate CLI:
+Run via the appropriate CLI for the `--from` LLM:
 
 ```bash
 PROMPT_FILE=$(mktemp /tmp/cross-review-primary-XXXXXX)
@@ -140,12 +159,15 @@ OUTPUT_FILE=$(mktemp /tmp/cross-review-primary-result-XXXXXX)
 
 # Write assembled prompt to PROMPT_FILE
 
-# Codex:
+# If --from is codex:
 codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
 
-# OpenCode:
+# If --from is opencode:
 opencode run "Follow the instructions in the attached file" \
   -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
+
+# If --from is claude (and you are NOT Claude):
+claude -p "$PROMPT_FILE" --output-file "$OUTPUT_FILE"
 ```
 
 Set `timeout: 600000` (10 minutes) on the Bash call.
@@ -155,12 +177,14 @@ Parse the output into the same structured findings format.
 ### Step 3: Validation review
 
 Send the primary review's findings to the validator LLM, along with the
-PR diff for its own independent review.
+PR diff for its own independent review. Apply the **self-awareness rule**:
+if `--to` matches your own identity, you are the validator — do it inline.
+Otherwise, shell out.
 
-#### If validator is `claude`
+#### If validator is YOU (inline)
 
-Claude already has the PR diff and branch checked out. Perform the
-validation inline (no external call needed):
+You already have the PR diff and branch checked out. Perform the
+validation directly:
 
 1. Do an independent review of the diff, producing your own findings.
 2. For each finding from the primary reviewer, give a verdict:
@@ -171,7 +195,7 @@ validation inline (no external call needed):
 Important: Complete the independent review FIRST before evaluating the
 primary reviewer's findings, to avoid anchoring bias.
 
-#### If validator is an external LLM (`codex` or `opencode`)
+#### If validator is a DIFFERENT LLM (external CLI)
 
 Build the validation prompt following `llm-assist`'s review template,
 then append the cross-validation task:
@@ -208,7 +232,26 @@ For each finding from the primary reviewer:
 - reasoning: <your explanation>
 ```
 
-Run via the appropriate CLI (same pattern as Step 2).
+Run via the appropriate CLI for the `--to` LLM:
+
+```bash
+PROMPT_FILE=$(mktemp /tmp/cross-review-validator-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-validator-result-XXXXXX)
+
+# Write assembled prompt to PROMPT_FILE
+
+# If --to is codex:
+codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
+
+# If --to is opencode:
+opencode run "Follow the instructions in the attached file" \
+  -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
+
+# If --to is claude (and you are NOT Claude):
+claude -p "$PROMPT_FILE" --output-file "$OUTPUT_FILE"
+```
+
+Set `timeout: 600000` (10 minutes) on the Bash call.
 
 #### Handle failure gracefully
 
