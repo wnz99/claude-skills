@@ -23,9 +23,9 @@ Use the `--provider` flag to choose which LLM CLI to invoke. Default: `codex`.
 | `all` | Both tools | Both installed | Both configured |
 
 Usage examples:
-- `/codex-assist review` — runs Codex (default)
-- `/codex-assist --provider opencode review` — runs OpenCode
-- `/codex-assist --provider all review` — runs both, cross-compares results
+- `/llm-assist review` — runs Codex (default)
+- `/llm-assist --provider opencode review` — runs OpenCode
+- `/llm-assist --provider all review` — runs both, cross-compares results
 
 When `--provider all` is used, run both tools in parallel (separate Bash
 calls), then synthesize findings from both. Label each finding's source
@@ -41,13 +41,13 @@ For `--provider all`, both CLIs must be available.
 
 | Mode | Command | Sandbox (Codex) | When to use |
 |------|---------|-----------------|-------------|
-| review | `/codex-assist review` | read-only | Code review with false-positive filtering |
-| debug | `/codex-assist debug` | read-only | Independent bug investigation |
-| plan | `/codex-assist plan` | read-only | Second opinion on architecture/approach |
-| verify | `/codex-assist verify` | read-only | Confirm a fix resolves the issue |
-| rca | `/codex-assist rca` | read-only | Root cause analysis with competing theories |
-| rescue | `/codex-assist rescue` | workspace-write | Delegate when stuck after 3+ failures |
-| ask | `/codex-assist ask` | read-only | Freeform question about code/libraries/platforms |
+| review | `/llm-assist review` | read-only | Code review with false-positive filtering |
+| debug | `/llm-assist debug` | read-only | Independent bug investigation |
+| plan | `/llm-assist plan` | read-only | Second opinion on architecture/approach |
+| verify | `/llm-assist verify` | read-only | Confirm a fix resolves the issue |
+| rca | `/llm-assist rca` | read-only | Root cause analysis with competing theories |
+| rescue | `/llm-assist rescue` | workspace-write | Delegate when stuck after 3+ failures |
+| ask | `/llm-assist ask` | read-only | Freeform question about code/libraries/platforms |
 
 > **Note:** Sandbox flags only apply to Codex. OpenCode uses its own
 > permission system configured in `~/.config/opencode/opencode.json`.
@@ -81,7 +81,7 @@ Build the prompt in a temp file. **ALWAYS include project coding standards
 from CLAUDE.md** — this ensures the external LLM applies the same rules.
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/codex-assist-XXXXXX)
+PROMPT_FILE=$(mktemp /tmp/llm-assist-XXXXXX)
 OUTPUT_FILE=$(mktemp /tmp/codex-result-XXXXXX)
 ```
 

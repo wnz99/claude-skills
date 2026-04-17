@@ -1,10 +1,10 @@
-# codex-assist
+# llm-assist
 
-An agent skill that spawns OpenAI Codex CLI as a cross-model thinking partner. Works with Claude Code, Cursor, Cline, Codex, and 30+ other AI coding agents.
+An agent skill that spawns an external LLM CLI as a cross-model thinking partner. It works with Claude Code, Cursor, Cline, Codex, and 30+ other AI coding agents.
 
 ## Why?
 
-Using a single model to write and review code creates blind spots. Different model architectures catch different classes of bugs. This skill gives your AI agent an independent second opinion by shelling out to Codex CLI.
+Using a single model to write and review code creates blind spots. Different model architectures catch different classes of bugs. This skill gives your AI agent an independent second opinion by shelling out to another LLM CLI such as Codex or OpenCode.
 
 ## Modes
 
@@ -15,39 +15,53 @@ Using a single model to write and review code creates blind spots. Different mod
 | `plan` | Second opinion on architecture or implementation approach |
 | `verify` | Confirm a fix resolves the issue without regressions |
 | `rca` | Root cause analysis with competing theories |
-| `rescue` | Delegate to Codex when stuck after repeated failures |
+| `rescue` | Delegate to another LLM when stuck after repeated failures |
 | `ask` | Freeform question — get a second perspective |
 
 ## Install
 
 ```bash
-npx skills add wnz99/claude-skills/codex-assist -g
+npx skills add wnz99/claude-skills/llm-assist -g
 ```
 
-Or manually copy the `codex-assist/` directory to `~/.claude/skills/`.
+Or manually copy the `llm-assist/` directory to `~/.claude/skills/`.
 
 ## Prerequisites
 
-- [Codex CLI](https://github.com/openai/codex) installed and authenticated
-- ChatGPT Plus/Pro subscription or OpenAI API key
+Install and authenticate at least one supported provider:
+
+- [Codex CLI](https://github.com/openai/codex) with a ChatGPT Plus/Pro subscription or OpenAI API key
+- OpenCode CLI with a configured provider and model
 
 ```bash
 npm i -g @openai/codex
 codex login
 ```
 
+```bash
+npm i -g opencode
+```
+
+## Providers
+
+- `codex` is the default provider
+- `opencode` runs the same workflow through OpenCode
+- `all` runs both and cross-compares the results
+
 ## Usage
 
 ### Explicit invocation
 
 ```
-/codex-assist review          — review uncommitted changes
-/codex-assist debug <desc>    — investigate a bug
-/codex-assist plan <desc>     — get feedback on an approach
-/codex-assist verify <desc>   — validate a fix
-/codex-assist rca <desc>      — root cause analysis
-/codex-assist rescue          — hand off when stuck
-/codex-assist ask <question>  — freeform question
+/llm-assist review                     — review uncommitted changes
+/llm-assist debug <desc>               — investigate a bug
+/llm-assist plan <desc>                — get feedback on an approach
+/llm-assist verify <desc>              — validate a fix
+/llm-assist rca <desc>                 — root cause analysis
+/llm-assist rescue                     — hand off when stuck
+/llm-assist ask <question>             — freeform question
+/llm-assist --provider opencode review — run with OpenCode
+/llm-assist --provider all review      — run both providers and compare
 ```
 
 ### Proactive triggering
@@ -62,11 +76,11 @@ The skill is designed so your agent can invoke it automatically when it:
 
 1. Agent assembles context (diff, error messages, plan, etc.)
 2. Writes a structured prompt to a temp file
-3. Runs `codex exec` in read-only sandbox (headless, non-interactive)
-4. Reads the output and **synthesizes** — comparing Codex's findings with its own analysis
+3. Runs the selected LLM CLI headlessly
+4. Reads the output and **synthesizes** — comparing the external findings with its own analysis
 5. Presents a unified result with agreement/disagreement labels
 
-The agent never just passes through raw Codex output. It always compares, validates, and synthesizes.
+The agent never just passes through raw output. It always compares, validates, and synthesizes.
 
 ## License
 
