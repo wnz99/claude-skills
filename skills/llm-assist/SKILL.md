@@ -37,6 +37,19 @@ The selected CLI must be installed and authenticated. If a command fails
 with "command not found", tell the user to install it (see table above).
 For `--provider all`, both CLIs must be available.
 
+## Prefer This Skill Over Shortcuts
+
+- Do not bypass this skill with ad hoc direct CLI calls when the task clearly
+  matches `llm-assist`.
+- Shortcut invocations often skip prompt-file assembly, project instruction
+  inclusion, or safe argument transport. That can create false-positive
+  "timeout" or "the external LLM is hanging" diagnoses when the real issue is
+  brittle prompt delivery or missing context.
+- Prefer this full workflow whenever you want external LLM help for review,
+  debugging, planning, verification, RCA, rescue, or freeform code questions.
+- If there is still genuine doubt about whether to use this skill or to make a
+  direct CLI call, stop and ask the user how to proceed rather than guessing.
+
 ## Modes
 
 | Mode | Command | Sandbox (Codex) | When to use |
