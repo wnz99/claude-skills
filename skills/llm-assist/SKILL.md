@@ -85,6 +85,60 @@ PROMPT_FILE=$(mktemp /tmp/llm-assist-XXXXXX)
 OUTPUT_FILE=$(mktemp /tmp/codex-result-XXXXXX)
 ```
 
+#### Prompt transport and quoting safety
+
+This skill often forwards arbitrary diffs, stack traces, markdown, and user
+text that may contain quotes, backticks, `$()`, backslashes, or multi-line
+content. Treat prompt assembly as a quoting-sensitive operation.
+
+- **Never** inline the full prompt into a shell command string.
+- **Never** build prompt bodies with `echo "$PROMPT"` for arbitrary content.
+- Use a **single-quoted heredoc** for static template text:
+  `cat > "$PROMPT_FILE" <<'EOF'`
+- Append **dynamic or untrusted** content with `printf '%s\n' "$value"` or by
+  redirecting file content with `cat file >> "$PROMPT_FILE"`.
+- When assembling CLI argv in Bash, prefer **arrays** over string
+  concatenation.
+- For provider invocation, pass the prompt via **stdin** or an attached file.
+  Only inline fixed literals such as `Follow the instructions in the attached file`.
+
+Safe pattern:
+
+```bash
+PROMPT_FILE=$(mktemp /tmp/llm-assist-prompt-XXXXXX.md)
+OUTPUT_FILE=$(mktemp /tmp/llm-assist-result-XXXXXX.txt)
+
+cat > "$PROMPT_FILE" <<'EOF'
+# Task: DEBUG
+
+## Instructions
+Investigate independently before comparing against any prior theories.
+EOF
+
+printf '\n## Bug Description\n%s\n' "$BUG_DESCRIPTION" >> "$PROMPT_FILE"
+printf '\n## Current Theories\n%s\n' "$THEORIES" >> "$PROMPT_FILE"
+
+{
+  printf '\n## Diff\n<diff>\n'
+  git diff HEAD
+  printf '\n</diff>\n'
+} >> "$PROMPT_FILE"
+```
+
+Unsafe patterns to avoid:
+
+```bash
+# Breaks on apostrophes, command substitutions, and newlines
+codex exec "Review: $PROMPT"
+
+# `echo` is not reliable for arbitrary prompt bodies
+echo "$PROMPT" > "$PROMPT_FILE"
+
+# Command-string concatenation is brittle
+CMD="opencode run \"$PROMPT\""
+eval "$CMD"
+```
+
 **CRITICAL: CLAUDE.md inclusion is mandatory, not optional.** If a CLAUDE.md
 (or equivalent project instructions file) exists in the repo, read it and
 include the coding guidelines and conventions sections in the prompt's
@@ -144,8 +198,14 @@ OpenCode uses `run` for non-interactive execution. Attach the prompt file
 with `-f` to avoid shell argument length limits on long prompts:
 
 ```bash
-opencode run "Follow the instructions in the attached file" \
-  -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
+opencode_cmd=(
+  opencode
+  run
+  "Follow the instructions in the attached file"
+  -f
+  "$PROMPT_FILE"
+)
+"${opencode_cmd[@]}" > "$OUTPUT_FILE" 2>&1
 ```
 
 > OpenCode does not have per-invocation sandbox flags. It uses its own
@@ -164,9 +224,17 @@ CODEX_OUTPUT=$(mktemp /tmp/codex-result-XXXXXX)
 OPENCODE_OUTPUT=$(mktemp /tmp/opencode-result-XXXXXX)
 
 # Run in parallel
-codex exec -s read-only --ephemeral -o "$CODEX_OUTPUT" - < "$PROMPT_FILE" &
-opencode run "Follow the instructions in the attached file" \
-  -f "$PROMPT_FILE" > "$OPENCODE_OUTPUT" 2>&1 &
+codex_cmd=(codex exec -s read-only --ephemeral -o "$CODEX_OUTPUT" -)
+opencode_cmd=(
+  opencode
+  run
+  "Follow the instructions in the attached file"
+  -f
+  "$PROMPT_FILE"
+)
+
+"${codex_cmd[@]}" < "$PROMPT_FILE" &
+"${opencode_cmd[@]}" > "$OPENCODE_OUTPUT" 2>&1 &
 wait
 ```
 
@@ -260,7 +328,7 @@ check for the `code-reviewer` skill and use it if available:
 
 Before starting the review, check if the `code-reviewer` skill is available
 (look for SKILL.md at `~/.agents/skills/code-reviewer/SKILL.md` or
-`~/.codex/skills/code-reviewer/SKILL.md` or `.claude/skills/code-reviewer/SKILL.md`).
+`~/.codex/skills/code-reviewer/SKILL.md` or `~/.claude/skills/code-reviewer/SKILL.md`).
 
 - If `code-reviewer` is found: use its workflow to conduct the review instead
   of the generic instructions below. Pass it the diff and any focus area.

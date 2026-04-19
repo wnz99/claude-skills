@@ -75,12 +75,24 @@ The skill is designed so your agent can invoke it automatically when it:
 ## How it works
 
 1. Agent assembles context (diff, error messages, plan, etc.)
-2. Writes a structured prompt to a temp file
+2. Writes a structured prompt to a temp file using quote-safe shell patterns
 3. Runs the selected LLM CLI headlessly
 4. Reads the output and **synthesizes** — comparing the external findings with its own analysis
 5. Presents a unified result with agreement/disagreement labels
 
 The agent never just passes through raw output. It always compares, validates, and synthesizes.
+
+## Prompt Safety
+
+The skill is designed to transport prompts safely even when they contain
+apostrophes, backticks, shell-looking fragments, markdown fences, or large
+multi-line diffs.
+
+- Use a temp prompt file, not an inline shell string
+- Use `cat <<'EOF'` for static template text
+- Use `printf '%s\n' "$value"` or `cat file` for dynamic content
+- Pass prompts via stdin or attached files to the external CLI
+- Avoid `echo` for arbitrary prompt bodies and avoid `eval`
 
 ## License
 

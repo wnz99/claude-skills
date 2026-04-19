@@ -3,6 +3,15 @@
 Each mode uses a specific prompt structure. The calling agent assembles
 the prompt file by combining project context with the mode-specific template.
 
+## Prompt Assembly Safety
+
+Render these templates into a prompt file with quote-safe shell patterns:
+
+- Use `cat <<'EOF'` for static markdown sections.
+- Append dynamic content with `printf '%s\n' "$value"` or `cat file`.
+- Do not inline the full rendered prompt into a shell argument.
+- Prefer stdin or attached files when handing the prompt to an external LLM.
+
 ## Common Header
 
 **MANDATORY** — always start with this if CLAUDE.md (or equivalent project
@@ -35,7 +44,7 @@ if over 4KB. Never omit the coding guideline sections.]
 
 Before starting the review, check if the `code-reviewer` skill is available
 (look for SKILL.md at `~/.agents/skills/code-reviewer/SKILL.md` or
-`~/.codex/skills/code-reviewer/SKILL.md` or `.claude/skills/code-reviewer/SKILL.md`).
+`~/.codex/skills/code-reviewer/SKILL.md` or `~/.claude/skills/code-reviewer/SKILL.md`).
 
 - If `code-reviewer` is found: use its workflow to conduct the review instead
   of the generic instructions below. Pass it the diff and any focus area.
