@@ -1,6 +1,6 @@
 ---
 name: llm-assist
-description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. By default, use the complementary model for the current agent: Codex -> Claude, Claude -> Codex. Use OpenCode only when the user explicitly asks for it, or when Codex/Claude are unavailable and the user approves OpenCode as the fallback. This skill assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex review, OpenCode review, or a second opinion."
+description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. The running agent should detect itself and default to the complementary model: Codex -> Claude, Claude -> Codex. If the running agent is OpenCode, ask the user which external model to use and offer to persist that preference in CLAUDE.md or AGENTS.md. Use OpenCode itself only when the user explicitly asks for it, or when Codex/Claude are unavailable and the user approves OpenCode as the fallback. This skill assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex review, OpenCode review, or a second opinion."
 ---
 
 # LLM Assist
@@ -19,6 +19,8 @@ Use the `--provider` flag to choose which LLM CLI to invoke.
 Default behavior:
 - When running inside Codex, default to `claude`
 - When running inside Claude, default to `codex`
+- When running inside OpenCode, ask the user which external model to use
+  and offer to persist that preference in `CLAUDE.md` or `AGENTS.md`
 - Use `opencode` only when the user explicitly asks for it
 - If the preferred Claude/Codex CLI is unavailable, check for the missing
   CLI first and then offer OpenCode as an explicit fallback
