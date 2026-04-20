@@ -81,6 +81,13 @@ For `--provider all`, both Claude and Codex must be available.
 - Do not shrink the prompt and rerun just because the original invocation is
   quiet. That wastes time and tokens. Prefer waiting for the original run to
   complete while monitoring it properly.
+- Do not use `nohup`, `disown`, or other detached/background launch patterns
+  for quiet providers such as Claude unless that exact provider/flag
+  combination has already been proven to work reliably in the current
+  environment.
+- Prefer a directly monitored foreground run for Claude-style CLIs. If you must
+  background a process, keep it in the current shell session, capture the real
+  child PID, and continue monitoring that same process until completion.
 
 ## Modes
 
@@ -127,9 +134,21 @@ Build the prompt in a temp file. **ALWAYS include project coding standards
 from CLAUDE.md** — this ensures the external LLM applies the same rules.
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/llm-assist-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/codex-result-XXXXXX)
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-prompt.XXXXXX")
+OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-output.XXXXXX")
 ```
+
+Immediately verify temp-file creation before writing anything:
+
+```bash
+test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE"
+case "$PROMPT_FILE $OUTPUT_FILE" in
+  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
+esac
+```
+
+Do not continue if either path still contains literal `XXXXXX` or the file
+does not exist. A malformed temp path invalidates all later monitoring.
 
 #### Prompt transport and quoting safety
 
@@ -151,8 +170,12 @@ content. Treat prompt assembly as a quoting-sensitive operation.
 Safe pattern:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/llm-assist-prompt-XXXXXX.md)
-OUTPUT_FILE=$(mktemp /tmp/llm-assist-result-XXXXXX.txt)
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-prompt.XXXXXX.md")
+OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-result.XXXXXX.txt")
+test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE"
+case "$PROMPT_FILE $OUTPUT_FILE" in
+  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
+esac
 
 cat > "$PROMPT_FILE" <<'EOF'
 # Task: DEBUG
@@ -234,6 +257,21 @@ Write output to a local file and stream that file in real time so you can
 observe progress while the command is still running. Prefer line-buffered
 streaming with `stdbuf` where available and mirror stderr into the same file.
 
+Before the real run, validate any provider-specific streaming flags or output
+format requirements with a tiny sanity check when you are using a new launch
+pattern. This is especially important for Claude, where combinations such as
+`--output-format stream-json` may require additional flags.
+
+Example sanity check:
+
+```bash
+claude -p --verbose --output-format stream-json --include-partial-messages \
+  'Reply with exactly OK.'
+```
+
+If the sanity check fails, fix the invocation first. Do not launch the real
+prompt until the provider/flag combination is known-good.
+
 For long-running or quiet providers, always create a sidecar metadata file so
 you can monitor the real LLM process, not just the wrapper shell. Record at
 least: provider, PID, prompt file, output file, and start time.
@@ -241,37 +279,47 @@ least: provider, PID, prompt file, output file, and start time.
 Preferred monitoring pattern for quiet providers:
 
 ```bash
-PROMPT_FILE=$(mktemp -t llm-assist-prompt)
-OUTPUT_FILE=$(mktemp -t llm-assist-result)
-META_FILE=$(mktemp -t llm-assist-meta)
-STATUS_FILE=$(mktemp -t llm-assist-status)
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-prompt.XXXXXX")
+OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-result.XXXXXX")
+META_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-meta.XXXXXX")
+STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-status.XXXXXX")
+test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE" && test -e "$META_FILE" && test -e "$STATUS_FILE"
+case "$PROMPT_FILE $OUTPUT_FILE $META_FILE $STATUS_FILE" in
+  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
+esac
 
-claude -p --output-format text < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1 &
-LLM_PID=$!
+claude_cmd=(
+  claude
+  -p
+  --verbose
+  --output-format
+  stream-json
+  --include-partial-messages
+)
+
+{
+  stdbuf -oL -eL "${claude_cmd[@]}" < "$PROMPT_FILE"
+} 2>&1 | tee -a "$OUTPUT_FILE" &
+PIPE_PID=$!
 
 cat > "$META_FILE" <<EOF
 provider=claude
-pid=$LLM_PID
+pid=$PIPE_PID
 prompt=$PROMPT_FILE
 output=$OUTPUT_FILE
 status=$STATUS_FILE
 started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
-tail -f "$OUTPUT_FILE" &
-TAIL_PID=$!
-
-wait "$LLM_PID"
-LLM_STATUS=$?
-printf '%s\n' "$LLM_STATUS" > "$STATUS_FILE"
-kill "$TAIL_PID" 2>/dev/null || true
-wait "$TAIL_PID" 2>/dev/null || true
+wait "$PIPE_PID"
+PIPE_STATUS=$?
+printf '%s\n' "$PIPE_STATUS" > "$STATUS_FILE"
 ```
 
 Use the metadata to monitor the process while it runs:
-- `ps -o pid=,etime=,pcpu=,state=,command= -p "$LLM_PID"`
+- `ps -o pid=,etime=,pcpu=,state=,command= -p "$PIPE_PID"`
 - `wc -c "$OUTPUT_FILE"` and `tail -n 20 "$OUTPUT_FILE"`
-- `lsof -p "$LLM_PID"` when you need to distinguish a live-but-quiet process
+- `lsof -p "$PIPE_PID"` when you need to distinguish a live-but-quiet process
   from a deadlocked or blocked one
 
 Do not kill a quiet process just because the output file has not grown yet.
@@ -284,8 +332,12 @@ Kill only when there is strong evidence of failure, such as:
 Safe monitoring pattern:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/codex-assist-prompt-XXXXXX.md)
-OUTPUT_FILE=$(mktemp /tmp/codex-assist-result-XXXXXX.txt)
+PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-assist-prompt.XXXXXX.md")
+OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-assist-result.XXXXXX.txt")
+test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE"
+case "$PROMPT_FILE $OUTPUT_FILE" in
+  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
+esac
 
 codex_cmd=(codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" -)
 
@@ -309,6 +361,7 @@ Codex, or whenever `--provider claude` is selected:
 claude_cmd=(
   claude
   -p
+  --verbose
   --output-format
   stream-json
   --include-partial-messages
@@ -381,11 +434,15 @@ opencode_cmd=(
 Run the standard pair in parallel Bash calls, with separate output files:
 
 ```bash
-CLAUDE_OUTPUT=$(mktemp /tmp/claude-result-XXXXXX)
-CODEX_OUTPUT=$(mktemp /tmp/codex-result-XXXXXX)
+CLAUDE_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/claude-result.XXXXXX")
+CODEX_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/codex-result.XXXXXX")
+test -e "$CLAUDE_OUTPUT" && test -e "$CODEX_OUTPUT"
+case "$CLAUDE_OUTPUT $CODEX_OUTPUT" in
+  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
+esac
 
 # Run in parallel
-claude -p --output-format text < "$PROMPT_FILE" > "$CLAUDE_OUTPUT" 2>&1 &
+claude -p --verbose --output-format stream-json --include-partial-messages < "$PROMPT_FILE" > "$CLAUDE_OUTPUT" 2>&1 &
 codex_cmd=(codex exec -s read-only --ephemeral -o "$CODEX_OUTPUT" -)
 "${codex_cmd[@]}" < "$PROMPT_FILE" &
 wait
