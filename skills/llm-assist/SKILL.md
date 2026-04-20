@@ -73,8 +73,13 @@ For `--provider all`, both Claude and Codex must be available.
   substantial prompts.
 - While waiting, monitor actual progress rather than assuming a hang from a
   quiet terminal.
+- Treat provider silence as ambiguous, not as failure. In particular,
+  `claude -p` and similar single-shot CLIs may remain silent until they finish.
+- If the process is still alive, prefer continued monitoring over killing it.
 - Only proceed without the reply if the invocation genuinely fails, times out
   after a reasonable wait, or the user explicitly tells you to continue.
+- If a trivial sanity prompt succeeds but a longer prompt stays quiet, prefer
+  reducing the prompt or improving monitoring before killing the process.
 
 ## Modes
 
@@ -211,6 +216,53 @@ sections (architecture docs, build commands) if over 4KB.]
 Write output to a local file and stream that file in real time so you can
 observe progress while the command is still running. Prefer line-buffered
 streaming with `stdbuf` where available and mirror stderr into the same file.
+
+For long-running or quiet providers, always create a sidecar metadata file so
+you can monitor the real LLM process, not just the wrapper shell. Record at
+least: provider, PID, prompt file, output file, and start time.
+
+Preferred monitoring pattern for quiet providers:
+
+```bash
+PROMPT_FILE=$(mktemp -t llm-assist-prompt)
+OUTPUT_FILE=$(mktemp -t llm-assist-result)
+META_FILE=$(mktemp -t llm-assist-meta)
+STATUS_FILE=$(mktemp -t llm-assist-status)
+
+claude -p --output-format text < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1 &
+LLM_PID=$!
+
+cat > "$META_FILE" <<EOF
+provider=claude
+pid=$LLM_PID
+prompt=$PROMPT_FILE
+output=$OUTPUT_FILE
+status=$STATUS_FILE
+started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+
+tail -f "$OUTPUT_FILE" &
+TAIL_PID=$!
+
+wait "$LLM_PID"
+LLM_STATUS=$?
+printf '%s\n' "$LLM_STATUS" > "$STATUS_FILE"
+kill "$TAIL_PID" 2>/dev/null || true
+wait "$TAIL_PID" 2>/dev/null || true
+```
+
+Use the metadata to monitor the process while it runs:
+- `ps -o pid=,etime=,pcpu=,state=,command= -p "$LLM_PID"`
+- `wc -c "$OUTPUT_FILE"` and `tail -n 20 "$OUTPUT_FILE"`
+- `lsof -p "$LLM_PID"` when you need to distinguish a live-but-quiet process
+  from a deadlocked or blocked one
+
+Do not kill a quiet process just because the output file has not grown yet.
+Kill only when there is strong evidence of failure, such as:
+- the process exited non-zero
+- the command exceeded the agreed wait budget
+- the process is no longer alive
+- there is clear provider-specific evidence of a stuck state
 
 Safe monitoring pattern:
 
