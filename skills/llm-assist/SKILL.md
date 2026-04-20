@@ -50,6 +50,18 @@ For `--provider all`, both CLIs must be available.
 - If there is still genuine doubt about whether to use this skill or to make a
   direct CLI call, stop and ask the user how to proceed rather than guessing.
 
+## Wait Before Coding
+
+- After invoking the external LLM, do not start new code changes until you
+  have received its reply or the invocation has clearly failed.
+- Give the external LLM a reasonable amount of time to complete before
+  concluding that it is stuck. Default to a long timeout such as 10 minutes for
+  substantial prompts.
+- While waiting, monitor actual progress rather than assuming a hang from a
+  quiet terminal.
+- Only proceed without the reply if the invocation genuinely fails, times out
+  after a reasonable wait, or the user explicitly tells you to continue.
+
 ## Modes
 
 | Mode | Command | Sandbox (Codex) | When to use |
@@ -180,6 +192,27 @@ sections (architecture docs, build commands) if over 4KB.]
 ```
 
 ### 3. Run the external LLM
+
+Write output to a local file and stream that file in real time so you can
+observe progress while the command is still running. Prefer line-buffered
+streaming with `stdbuf` where available and mirror stderr into the same file.
+
+Safe monitoring pattern:
+
+```bash
+PROMPT_FILE=$(mktemp /tmp/codex-assist-prompt-XXXXXX.md)
+OUTPUT_FILE=$(mktemp /tmp/codex-assist-result-XXXXXX.txt)
+
+codex_cmd=(codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" -)
+
+{
+  stdbuf -oL -eL "${codex_cmd[@]}" < "$PROMPT_FILE"
+} 2>&1 | tee -a "$OUTPUT_FILE"
+```
+
+If the provider already writes directly to an output file, keep that file and
+monitor it with `tail -f "$OUTPUT_FILE"` from a second process while the main
+command runs.
 
 Choose the command based on the selected `--provider`.
 
