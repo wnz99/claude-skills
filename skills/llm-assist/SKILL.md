@@ -1,6 +1,6 @@
 ---
 name: llm-assist
-description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help from Codex or OpenCode for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. It assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex/OpenCode review, or a second opinion."
+description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. By default, use the complementary model for the current agent: Codex -> Claude, Claude -> Codex. Use OpenCode only when the user explicitly asks for it, or when Codex/Claude are unavailable and the user approves OpenCode as the fallback. This skill assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex review, OpenCode review, or a second opinion."
 ---
 
 # LLM Assist
@@ -14,28 +14,40 @@ blind spots, eliminating sycophancy bias and local minima.
 
 ## Provider Selection
 
-Use the `--provider` flag to choose which LLM CLI to invoke. Default: `codex`.
+Use the `--provider` flag to choose which LLM CLI to invoke.
 
-| Provider | CLI tool | Install | Auth |
-|----------|----------|---------|------|
-| `codex` (default) | OpenAI Codex CLI | `npm i -g @openai/codex` | ChatGPT subscription or OpenAI API key |
-| `opencode` | OpenCode CLI | `npm i -g opencode` | Configured via `~/.config/opencode/opencode.json` (provider + model) |
-| `all` | Both tools | Both installed | Both configured |
+Default behavior:
+- When running inside Codex, default to `claude`
+- When running inside Claude, default to `codex`
+- Use `opencode` only when the user explicitly asks for it
+- If the preferred Claude/Codex CLI is unavailable, check for the missing
+  CLI first and then offer OpenCode as an explicit fallback
+- `--provider all` means the standard cross-model pair: `codex` + `claude`
+
+| Provider | When to use | CLI tool | Install | Auth |
+|----------|-------------|----------|---------|------|
+| `claude` | Default external provider when the current agent is Codex | Claude Code CLI | `npm i -g @anthropic-ai/claude-code` | Claude Code auth |
+| `codex` | Default external provider when the current agent is Claude | OpenAI Codex CLI | `npm i -g @openai/codex` | ChatGPT subscription or OpenAI API key |
+| `opencode` | Explicit opt-in, or approved fallback when Claude/Codex is unavailable | OpenCode CLI | `npm i -g opencode` | Configured via `~/.config/opencode/opencode.json` (provider + model) |
+| `all` | Explicit cross-check with the standard pair | Claude Code CLI + OpenAI Codex CLI | Both installed | Both configured |
 
 Usage examples:
-- `/llm-assist review` — runs Codex (default)
-- `/llm-assist --provider opencode review` — runs OpenCode
-- `/llm-assist --provider all review` — runs both, cross-compares results
+- `/llm-assist review` — runs the complementary provider by default
+- `/llm-assist --provider claude review` — runs Claude explicitly
+- `/llm-assist --provider codex review` — runs Codex explicitly
+- `/llm-assist --provider opencode review` — runs OpenCode explicitly
+- `/llm-assist --provider all review` — runs Codex + Claude in parallel
 
-When `--provider all` is used, run both tools in parallel (separate Bash
-calls), then synthesize findings from both. Label each finding's source
-(CODEX, OPENCODE, BOTH) in the final report.
+When `--provider all` is used, run Codex and Claude in parallel, then
+synthesize findings from both. Label each finding's source
+(`CLAUDE`, `CODEX`, `BOTH`) in the final report. Do not add OpenCode to
+`all` unless the user explicitly asks for it.
 
 ## Prerequisites
 
 The selected CLI must be installed and authenticated. If a command fails
 with "command not found", tell the user to install it (see table above).
-For `--provider all`, both CLIs must be available.
+For `--provider all`, both Claude and Codex must be available.
 
 ## Prefer This Skill Over Shortcuts
 
@@ -74,8 +86,9 @@ For `--provider all`, both CLIs must be available.
 | rescue | `/llm-assist rescue` | workspace-write | Delegate when stuck after 3+ failures |
 | ask | `/llm-assist ask` | read-only | Freeform question about code/libraries/platforms |
 
-> **Note:** Sandbox flags only apply to Codex. OpenCode uses its own
-> permission system configured in `~/.config/opencode/opencode.json`.
+> **Note:** Codex is the only provider in this skill with the sandbox flags
+> documented below. Claude and OpenCode use their own permission systems and
+> should be invoked explicitly when needed.
 
 ## Invocation Flow
 
@@ -216,7 +229,28 @@ command runs.
 
 Choose the command based on the selected `--provider`.
 
-#### Codex (default)
+#### Claude
+
+Use Claude as the default external provider when this skill runs inside
+Codex, or whenever `--provider claude` is selected:
+
+```bash
+claude_cmd=(
+  claude
+  -p
+  --output-format
+  text
+)
+
+{
+  stdbuf -oL -eL "${claude_cmd[@]}" < "$PROMPT_FILE"
+} 2>&1 | tee -a "$OUTPUT_FILE"
+```
+
+#### Codex
+
+Use Codex as the default external provider when this skill runs inside
+Claude, or whenever `--provider codex` is selected.
 
 All modes except rescue use read-only sandbox:
 
@@ -240,6 +274,9 @@ codex exec \
 
 #### OpenCode
 
+Only use OpenCode when the user explicitly asks for it, or when Claude/Codex
+is unavailable and the user approves OpenCode as the fallback.
+
 OpenCode uses `run` for non-interactive execution. Attach the prompt file
 with `-f` to avoid shell argument length limits on long prompts:
 
@@ -261,26 +298,18 @@ opencode_cmd=(
 > The default output includes a header line (`> build · model-name`).
 > Strip it when parsing: `tail -n +3 "$OUTPUT_FILE"`.
 
-#### All (both providers)
+#### All (Codex + Claude)
 
-Run both in parallel Bash calls, with separate output files:
+Run the standard pair in parallel Bash calls, with separate output files:
 
 ```bash
+CLAUDE_OUTPUT=$(mktemp /tmp/claude-result-XXXXXX)
 CODEX_OUTPUT=$(mktemp /tmp/codex-result-XXXXXX)
-OPENCODE_OUTPUT=$(mktemp /tmp/opencode-result-XXXXXX)
 
 # Run in parallel
+claude -p --output-format text < "$PROMPT_FILE" > "$CLAUDE_OUTPUT" 2>&1 &
 codex_cmd=(codex exec -s read-only --ephemeral -o "$CODEX_OUTPUT" -)
-opencode_cmd=(
-  opencode
-  run
-  "Follow the instructions in the attached file"
-  -f
-  "$PROMPT_FILE"
-)
-
 "${codex_cmd[@]}" < "$PROMPT_FILE" &
-"${opencode_cmd[@]}" > "$OPENCODE_OUTPUT" 2>&1 &
 wait
 ```
 
@@ -290,8 +319,10 @@ If a command fails, check:
 
 | Error | Action |
 |-------|--------|
+| `claude: command not found` | Tell user: `npm i -g @anthropic-ai/claude-code` |
 | `codex: command not found` | Tell user: `npm i -g @openai/codex` |
 | `opencode: command not found` | Tell user: `npm i -g opencode` |
+| Preferred Claude/Codex CLI unavailable | Offer OpenCode as a fallback only if the user approves using it |
 | Auth/API error | Tell user to check auth config for the failing provider |
 | Timeout | Report partial results if output file has content |
 
@@ -300,7 +331,7 @@ If a command fails, check:
 Read the output file(s). Do NOT just pass through raw output. Instead:
 
 When using `--provider all`, read both output files and label each finding
-with its source: **CODEX**, **OPENCODE**, or **BOTH** (found by both).
+with its source: **CLAUDE**, **CODEX**, or **BOTH** (found by both).
 
 **For review mode:**
 - Parse findings from each provider
@@ -413,12 +444,13 @@ used with Codex's `--output-schema` to get machine-parseable review findings.
 
 - The cross-model benefit comes from architectural differences — the same
   bug can be invisible to one model and obvious to another.
-- Codex uses GPT models; OpenCode uses whatever provider/model is configured
-  in `~/.config/opencode/opencode.json`.
+- Claude uses Anthropic models, Codex uses GPT models, and OpenCode uses
+  whatever provider/model is configured in
+  `~/.config/opencode/opencode.json`.
 - For large diffs, consider splitting into focused chunks rather than
   sending everything at once.
 - Codex sessions are ephemeral by default. If you need multi-round
   interaction, drop `--ephemeral` and use
   `codex exec resume --last "follow-up instructions"`.
-- OpenCode's `run` command is always single-shot (no session persistence).
+- Claude `-p` and OpenCode `run` are single-shot commands.
 - Keep prompt files under 100KB — very large contexts degrade quality.
