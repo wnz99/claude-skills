@@ -1,6 +1,6 @@
 ---
 name: llm-assist
-description: "Spawn an external LLM CLI (Codex or OpenCode) as a cross-model thinking partner for debugging, code review, planning, root cause analysis, fix verification, and rescue when stuck. Use this skill whenever you need a second opinion from a different LLM, want to cross-validate findings, are stuck after multiple failed attempts, need independent verification of a fix, want to compare review results to filter false positives, or need a fresh perspective on architecture/planning decisions. Also trigger proactively when: you've failed the same approach 3+ times, a code review would benefit from cross-model validation, you're unsure about platform-specific behavior you can't test, or the user explicitly asks for a second opinion, codex review, or external help."
+description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help from Codex or OpenCode for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. It assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex/OpenCode review, or a second opinion."
 ---
 
 # LLM Assist
