@@ -78,8 +78,9 @@ For `--provider all`, both Claude and Codex must be available.
 - If the process is still alive, prefer continued monitoring over killing it.
 - Only proceed without the reply if the invocation genuinely fails, times out
   after a reasonable wait, or the user explicitly tells you to continue.
-- If a trivial sanity prompt succeeds but a longer prompt stays quiet, prefer
-  reducing the prompt or improving monitoring before killing the process.
+- Do not shrink the prompt and rerun just because the original invocation is
+  quiet. That wastes time and tokens. Prefer waiting for the original run to
+  complete while monitoring it properly.
 
 ## Modes
 
