@@ -194,6 +194,22 @@ constraints. For review mode specifically, instruct the external LLM to
 check each finding against these project-specific guidelines and flag
 violations as review findings.
 
+When the selected provider supports incremental output, instruct the external
+LLM to emit brief periodic progress markers while it works, without stopping
+for confirmation. Use a stable format so the stream is easy to recognize and
+monitor, for example:
+
+```text
+While working, periodically emit a single line in this exact form:
+STATUS: <short progress message>
+
+Do not stop for confirmation after a status line. Continue working until the
+task is complete, then emit the full final answer.
+```
+
+Keep these status markers short, infrequent, and low-noise. They exist only
+to confirm forward progress during long-running invocations.
+
 Read `references/prompt-templates.md` for the exact prompt structure
 for each mode. The general pattern is:
 
@@ -294,13 +310,17 @@ claude_cmd=(
   claude
   -p
   --output-format
-  text
+  stream-json
+  --include-partial-messages
 )
 
 {
   stdbuf -oL -eL "${claude_cmd[@]}" < "$PROMPT_FILE"
 } 2>&1 | tee -a "$OUTPUT_FILE"
 ```
+
+Prefer this streaming mode for long-running prompts so `STATUS:` markers and
+partial output can be observed in real time.
 
 #### Codex
 
@@ -333,7 +353,8 @@ Only use OpenCode when the user explicitly asks for it, or when Claude/Codex
 is unavailable and the user approves OpenCode as the fallback.
 
 OpenCode uses `run` for non-interactive execution. Attach the prompt file
-with `-f` to avoid shell argument length limits on long prompts:
+with `-f` to avoid shell argument length limits on long prompts. Prefer
+`--format json` when you want event-style output captured in real time:
 
 ```bash
 opencode_cmd=(
@@ -342,6 +363,8 @@ opencode_cmd=(
   "Follow the instructions in the attached file"
   -f
   "$PROMPT_FILE"
+  --format
+  json
 )
 "${opencode_cmd[@]}" > "$OUTPUT_FILE" 2>&1
 ```
