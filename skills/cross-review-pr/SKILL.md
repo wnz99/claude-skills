@@ -84,6 +84,42 @@ the other defaults to `codex` and vice versa. If the provided value is
 
 ## Workflow
 
+### Step 0: Terminal Awareness
+
+Before gathering diffs or generating prompt files, inspect the active terminal
+environment and choose commands that are safe for that shell:
+
+```bash
+printf 'SHELL=%s\n' "${SHELL:-unknown}"
+ps -p $$ -o comm=
+command -v bash || true
+command -v zsh || true
+```
+
+If the current shell is `zsh`, do not rely on zsh word splitting. Prefer one
+of these patterns:
+
+- Run prompt-generation scripts under `bash` with `set -euo pipefail`.
+- Use newline-safe loops: `while IFS= read -r file; do ...; done < "$file_list"`.
+- Use shell arrays for command argv.
+- Append dynamic content with `printf '%s\n' "$value"` or `cat file`, not
+  `echo`.
+
+Avoid unquoted list expansion such as `for file in $FILES; do ...; done`.
+That can produce empty or malformed prompt sections under zsh.
+
+After generating any prompt file, validate it before invoking reviewers:
+
+```bash
+wc -l "$PROMPT_FILE"
+rg -n '^(diff --git|## Source:|<pr-diff>|<diff>)' "$PROMPT_FILE" | head
+test "$(wc -l < "$PROMPT_FILE")" -gt 50
+```
+
+If the prompt is unexpectedly short or lacks source/diff markers, stop and
+regenerate it under a known-safe shell before running Claude, Codex, or
+OpenCode. Do not launch reviewers against empty or placeholder prompts.
+
 ### Step 1: Gather PR context
 
 Extract the PR number from the argument. If it's a URL, parse the number from it.

@@ -74,6 +74,23 @@ monitor the process and output file before retrying or killing it. Continue
 without the reply only if the invocation fails, times out after a reasonable
 wait, or the user explicitly tells you to continue.
 
+## Terminal Awareness
+
+Before running shell commands, generating prompt files, or invoking provider
+CLIs, inspect the terminal environment and choose shell-safe command patterns:
+
+```bash
+printf 'SHELL=%s\n' "${SHELL:-unknown}"
+ps -p $$ -o comm=
+command -v bash || true
+command -v zsh || true
+```
+
+If the active shell is `zsh`, do not rely on implicit word splitting. Use
+quoted variables, shell arrays, `while IFS= read -r ...` loops, or run complex
+prompt-generation snippets under `bash` with `set -euo pipefail`. Validate
+generated prompt/output files before invoking an external model.
+
 ## Modes
 
 | Mode | Command | Sandbox (Codex) | When to use |

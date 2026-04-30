@@ -11,6 +11,23 @@ description:
 Review code with a findings-first, evidence-backed approach. Prioritize real
 bugs and regressions over style commentary.
 
+## Terminal Awareness
+
+Before running shell commands, inspect the active terminal environment and use
+commands that are safe for that shell:
+
+```bash
+printf 'SHELL=%s\n' "${SHELL:-unknown}"
+ps -p $$ -o comm=
+command -v bash || true
+command -v zsh || true
+```
+
+If the active shell is `zsh`, do not rely on implicit word splitting. Use
+quoted variables, shell arrays, newline-safe loops, or run complex scripts
+under `bash` with `set -euo pipefail`. This matters when building file lists,
+reading changed files, or running verification commands.
+
 ## Workflow
 
 ### 1. Determine Review Target

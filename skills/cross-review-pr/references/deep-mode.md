@@ -18,6 +18,75 @@ comparative review.
 
 Skip deep mode for narrow changes such as one file or one function.
 
+## D0. Shell And Command Preflight
+
+Before generating prompts or running review commands, inspect the terminal
+environment and choose command patterns that are safe for the active shell.
+Do this before any command that builds file lists, loops over files, or embeds
+diff/source content in prompt files.
+
+Run a quick preflight:
+
+```bash
+printf 'SHELL=%s\n' "${SHELL:-unknown}"
+ps -p $$ -o comm=
+command -v bash || true
+command -v zsh || true
+```
+
+If the current shell is `zsh`, do not rely on zsh word splitting. Either:
+
+- run prompt-generation scripts under `bash`, or
+- use shell-agnostic newline-safe loops and arrays.
+
+Preferred pattern for generated review prompts:
+
+```bash
+bash <<'BASH'
+set -euo pipefail
+
+prompt_file="$1"
+file_list="$2"
+
+cat > "$prompt_file" <<'EOF'
+# Deep Review Area
+EOF
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  {
+    printf '\n## Source: %s\n\n```text\n' "$file"
+    sed -n '1,240p' "$file"
+    printf '\n```\n'
+  } >> "$prompt_file"
+done < "$file_list"
+BASH
+```
+
+Avoid patterns that depend on unquoted expansion or implicit splitting:
+
+```bash
+# Unsafe in zsh: may iterate once over the entire string or produce empty input.
+for file in $FILES; do
+  cat "$file" >> "$PROMPT_FILE"
+done
+
+# Unsafe for arbitrary file names and multiline values.
+echo "$DIFF" >> "$PROMPT_FILE"
+```
+
+After generating every area prompt, validate it before launching reviewers:
+
+```bash
+wc -l "$PROMPT_FILE"
+rg -n '^(diff --git|## Source:|<diff>)' "$PROMPT_FILE" | head
+test "$(wc -l < "$PROMPT_FILE")" -gt 50
+```
+
+If a prompt is unexpectedly short or lacks source/diff markers, stop and
+regenerate it under a known shell, preferably `bash`. Do not launch primary or
+validator reviewers against empty or placeholder prompts.
+
 ## D1. Resolve Scope
 
 | Scope shape | How to resolve |

@@ -2,6 +2,22 @@
 
 Use this reference when running an external LLM CLI from `llm-assist`.
 
+## Terminal Preflight
+
+Before assembling prompt files or invoking provider commands, inspect the
+active shell:
+
+```bash
+printf 'SHELL=%s\n' "${SHELL:-unknown}"
+ps -p $$ -o comm=
+command -v bash || true
+command -v zsh || true
+```
+
+If the active shell is `zsh`, do not depend on implicit word splitting.
+Prefer Bash for complex generation scripts, or use arrays and newline-safe
+loops. Validate generated prompt files before invoking providers.
+
 ## Install Commands
 
 | Provider | Install | Auth |
