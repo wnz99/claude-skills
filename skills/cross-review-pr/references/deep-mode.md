@@ -5,9 +5,17 @@ asks for a deep, multi-area, or parallel-agent review.
 
 Deep mode has one precise meaning: split the scope into focused review areas
 and run reviewer agents in parallel. Do not satisfy deep mode with one longer
-inline pass. If the current harness cannot launch parallel agents, say that
-strict deep mode is unavailable and clearly label any fallback as a normal
-comparative review.
+inline pass.
+
+In hosts with restrictive delegation policy, "deep review" requests this
+workflow but may not be explicit permission to spawn sub-agents. If the host
+requires explicit permission for sub-agents, delegation, or parallel agent
+work, ask for that permission before spawning. Do not silently use a fallback
+such as external processes plus one local validation pass.
+
+If the current harness cannot launch parallel agents, or if the user declines
+sub-agents, say that strict deep mode is unavailable and ask whether to run a
+normal comparative fallback instead.
 
 ## When To Use
 
@@ -86,6 +94,38 @@ test "$(wc -l < "$PROMPT_FILE")" -gt 50
 If a prompt is unexpectedly short or lacks source/diff markers, stop and
 regenerate it under a known shell, preferably `bash`. Do not launch primary or
 validator reviewers against empty or placeholder prompts.
+
+## D0b. Delegation Authorization
+
+Before decomposing areas or launching reviewers, decide whether strict deep
+mode is authorized in the current host.
+
+Strict deep mode requires parallel reviewer agents. If the host policy says
+sub-agents/delegation/parallel agent work require explicit user authorization,
+check the user's wording:
+
+- Explicit enough: "spawn sub-agents", "use parallel reviewer agents",
+  "delegate to agents", "parallel agent review".
+- Not explicit enough by itself: "deep review", "deep comparative review",
+  "`--deep`", "be thorough".
+
+If authorization is missing, ask:
+
+```text
+Strict deep mode requires spawning parallel reviewer sub-agents. Do you want me
+to spawn parallel reviewer sub-agents for this review?
+```
+
+To bypass this checkpoint, the user must explicitly ask for sub-agents or
+parallel agent work in the original request, for example:
+
+- "Run a deep parallel-agent PR review."
+- "Run `cross-review-pr --deep` and spawn parallel reviewer sub-agents."
+- "Delegate each deep-review area to a separate reviewer agent."
+
+Only after the user says yes should you spawn area reviewer agents. If the user
+says no, ask whether to run a clearly labeled non-deep comparative fallback.
+Do not call a fallback "deep mode".
 
 ## D1. Resolve Scope
 

@@ -1,6 +1,6 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a pull request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep review, multi-area review, or when the user wants two LLMs to review a PR together. Deep review means parallel multi-area reviewer fanout; see references/deep-mode.md."
+description: "Cross-model comparative review of a pull request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep review, multi-area review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
 ---
 
 # Cross-Review PR
@@ -55,12 +55,11 @@ If the role is a *different* LLM, you invoke it via its CLI.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
 - **--deep** (optional): Run the multi-agent multi-area review described
-  in the **Deep Mode** section below. The word "deep" in the user's
-  request is equivalent to passing `--deep`; do not interpret it as a
-  generic request for extra thoroughness. Each area is reviewed by an
-  independent parallel agent that internally runs the same primary/validator
-  cross-review on its slice of code. Default areas: 5. Override with
-  `--areas N`.
+  in the **Deep Mode** section below. The word "deep" requests deep mode, but
+  it is not automatically explicit permission to spawn sub-agents in hosts
+  with restrictive delegation policy. If the host requires explicit permission
+  for sub-agents or parallel agent work, ask for that permission before
+  launching strict deep mode. Default areas: 5. Override with `--areas N`.
 - **--areas N** (optional, deep mode only): Number of focus areas to
   decompose the scope into. Default: `5`. Range: 2–8. Smaller scopes
   may use fewer; the skill will downscale automatically.
@@ -119,6 +118,29 @@ test "$(wc -l < "$PROMPT_FILE")" -gt 50
 If the prompt is unexpectedly short or lacks source/diff markers, stop and
 regenerate it under a known-safe shell before running Claude, Codex, or
 OpenCode. Do not launch reviewers against empty or placeholder prompts.
+
+### Step 0b: Deep-mode delegation authorization
+
+If `--deep` is active, read `references/deep-mode.md` before proceeding.
+Strict deep mode requires independent parallel reviewer agents. In environments
+that only allow sub-agents, delegation, or parallel agent work after explicit
+user authorization, a request like "deep review" or "deep comparative PR
+review" is not enough by itself.
+
+If explicit authorization is missing, stop and ask:
+
+```text
+Strict deep mode requires spawning parallel reviewer sub-agents. Do you want me
+to spawn parallel reviewer sub-agents for this review?
+```
+
+To avoid this checkpoint, the user can explicitly request strict deep mode with
+phrases like "deep parallel-agent review", "spawn parallel reviewer
+sub-agents", or "`--deep` with sub-agents".
+
+Do not silently fall back to one inline pass, local-only validation, or only
+external CLI processes. If the user declines sub-agents, ask whether they want
+a non-deep comparative fallback and label that fallback clearly.
 
 ### Step 1: Gather PR context
 
