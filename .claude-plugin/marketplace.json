@@ -5,9 +5,9 @@
   "plugins": [
     {
       "name": "cross-model-review",
-      "description": "Cross-model code review and debugging skills using Claude + OpenAI Codex",
+      "description": "Cross-model code review, debugging, and validation skills using Claude, Codex, and OpenCode",
       "skills": [
-        "skills/codex-assist",
+        "skills/llm-assist",
         "skills/cross-review-pr",
         "skills/code-reviewer"
       ],

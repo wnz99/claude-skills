@@ -14,7 +14,7 @@ Render these templates into a prompt file with quote-safe shell patterns:
 
 ## Common Header
 
-**MANDATORY** — always start with this if CLAUDE.md (or equivalent project
+**MANDATORY** - always start with this if CLAUDE.md (or equivalent project
 instructions file) exists in the repo:
 
 ```markdown
@@ -25,7 +25,7 @@ You MUST apply these when analyzing code. Violations of these guidelines
 are review findings, not style preferences.
 
 <project-conventions>
-[CLAUDE.md contents — prioritize coding guideline and convention sections:
+[CLAUDE.md contents - prioritize coding guideline and convention sections:
 language-specific guidelines, design patterns, code review standards,
 architectural constraints, and quality requirements.
 Trim non-guideline sections (build commands, deployment, project overview)
@@ -56,7 +56,7 @@ Review the following diff for bugs, correctness issues, performance
 problems, and style violations against the project conventions above.
 
 ## Focus
-[User-specified focus, or "General review — check for correctness,
+[User-specified focus, or "General review - check for correctness,
 error handling, performance, security, and style."]
 
 ## Diff
@@ -91,7 +91,7 @@ If something looks intentional, note it but don't flag it as a bug.
 ```markdown
 # Debug Investigation
 
-Investigate this bug independently. Do NOT anchor on the theories below —
+Investigate this bug independently. Do NOT anchor on the theories below -
 form your own hypothesis first, then compare.
 
 ## Bug Description
@@ -101,7 +101,7 @@ form your own hypothesis first, then compare.
 [File paths and key code sections]
 
 ## Current Theories (from another investigator)
-[Claude's theories — provided for comparison AFTER the external LLM forms its own]
+[Calling agent's theories - provided for comparison AFTER the external LLM forms its own]
 
 ## Instructions
 
@@ -162,7 +162,7 @@ without introducing regressions.
 ## Instructions
 
 1. Confirm the fix addresses the root cause (not just symptoms)
-2. Check for regressions — does the fix break any existing behavior?
+2. Check for regressions - does the fix break any existing behavior?
 3. Check for edge cases the fix might miss
 4. Check that error handling is complete
 5. Verdict: VERIFIED / CONCERNS / INSUFFICIENT
@@ -200,7 +200,7 @@ and determine the most likely root cause.
 ## Rescue
 
 ```markdown
-# Rescue — Fresh Approach Needed
+# Rescue - Fresh Approach Needed
 
 The current investigator is stuck after multiple failed attempts.
 Approach this problem from scratch.
@@ -218,7 +218,7 @@ Approach this problem from scratch.
 
 1. Do NOT repeat the failed approaches
 2. Start from the requirements and work forward
-3. Read the relevant code yourself — don't trust summaries
+3. Read the relevant code yourself - don't trust summaries
 4. If you find a solution, implement it
 5. If you also get stuck, explain what you learned and what
    the next investigator should try

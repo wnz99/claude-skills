@@ -1,6 +1,6 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a Pull Request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude<->Codex. Supports any combination of Claude, Codex, and OpenCode via --from/--to flags. Deep means parallel-agent fanout: if the user asks for a 'deep PR review', 'deep comparative review', 'deep cross-review', 'multi-area review', or uses --deep, treat that as a request to spawn 4–5 parallel reviewer agents, each focused on a distinct review area with strict spec-anchored prompts, finding validation, and missing-test gap analysis. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', 'deep review', 'multi-area review', 'parallel-agent review', or wants two LLMs to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', 'compare reviews', or 'run a deep cross-review'."
+description: "Cross-model comparative review of a pull request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep review, multi-area review, or when the user wants two LLMs to review a PR together. Deep review means parallel multi-area reviewer fanout; see references/deep-mode.md."
 ---
 
 # Cross-Review PR
@@ -126,12 +126,7 @@ Checkout the PR branch so you have full file access:
 gh pr checkout "$PR_NUM"
 ```
 
-If you have a `code-reviewer` skill installed, invoke it:
-
-```
-Skill(skill="code-reviewer", args="PR #$PR_NUM")
-```
-
+If you have a `code-reviewer` skill installed, use that skill's workflow.
 Otherwise, review the diff directly. Produce a structured list where each
 finding has: severity (Critical/Improvement/Nitpick), file, location,
 title, and description. End with an overall verdict: Approved or Request Changes.
@@ -179,7 +174,11 @@ opencode run "Follow the instructions in the attached file" \
   -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 
 # If --from is claude (and you are NOT Claude):
-claude -p "$PROMPT_FILE" --output-file "$OUTPUT_FILE"
+claude -p "Follow the instructions provided on stdin." \
+  --verbose \
+  --output-format stream-json \
+  --include-partial-messages \
+  < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 ```
 
 Set `timeout: 600000` (10 minutes) on the Bash call.
@@ -260,7 +259,11 @@ opencode run "Follow the instructions in the attached file" \
   -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 
 # If --to is claude (and you are NOT Claude):
-claude -p "$PROMPT_FILE" --output-file "$OUTPUT_FILE"
+claude -p "Follow the instructions provided on stdin." \
+  --verbose \
+  --output-format stream-json \
+  --include-partial-messages \
+  < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 ```
 
 Set `timeout: 600000` (10 minutes) on the Bash call.
@@ -395,301 +398,13 @@ git checkout - 2>/dev/null || true
 
 ## Deep Mode
 
-Activated by `--deep` or by the user using the word "deep" for the PR
-review. In this skill, **deep has one precise meaning**: spawn parallel
-reviewer agents, each focused on a specific review area. The standard
-mode runs one primary + one validator over the full scope. Deep mode
-decomposes the scope into 4–5 distinct **focus areas** and runs an
-independent reviewer agent per area in parallel. Each area-agent then
-runs its own primary/validator cross-review on its slice, so the user
-gets a multi-agent multi-area synthesis instead of a single global
-review.
-
-Do not satisfy a deep review by doing one longer inline pass. The point
-of Deep Mode is to split attention across multiple focused reviewers so
-bugs, correctness issues, integration gaps, and missing tests buried in
-a large corpus are less likely to be missed by one agent carrying the
-entire diff in a single context.
-
-If the current harness cannot spawn parallel agents, say that strict
-Deep Mode is unavailable in this environment before continuing. Then
-either ask for explicit permission/alternative tooling if the harness
-requires it, or clearly label the fallback as a non-deep comparative
-review.
-
-The empirical reason this exists: a single reviewer pass over a large
-diff produces shallow generic findings; the reviewer's attention is
-spread thin and it tends to flag stylistic concerns and miss
-correctness bugs deep in specific subsystems. A focused reviewer with
-verbatim spec excerpts and a tight scope produces concrete bugs
-anchored to file:line. Run 4–5 of those in parallel and you cover the
-codebase breadth without losing depth.
-
-### When to use
-
-- Critical PRs that touch multiple subsystems (parser + storage +
-  classifier in one PR).
-- Periodic codebase-health audits — point at `src/` with `--deep`,
-  let the agents fan out.
-- After major refactors that crossed module boundaries.
-- When you've already done a default-mode review and want a second,
-  deeper pass.
-
-Skip deep mode for narrow PRs (one file, one function). The fan-out
-overhead isn't worth it.
-
-### Step D1: Determine scope
-
-Resolve the scope argument into a concrete file list:
-
-| Scope shape | How to resolve |
-|---|---|
-| PR number / URL | `gh pr diff "$PR_NUM" --name-only` then read each file |
-| Branch range (`main..HEAD`) | `git diff --name-only main..HEAD` |
-| Directory path (`src/foo/`) | `find <path> -name '*.py' -o -name '*.ts' …` |
-| Omitted | Default to `src/` (or repo source root if different) |
-
-If the resolved file list exceeds 50 files or 10,000 LOC, ask the user
-to confirm before proceeding (deep mode will spawn many parallel
-agents).
-
-### Step D2: Decompose into focus areas
-
-Split the file list into 4–5 areas (or `--areas N`). The split must
-satisfy:
-
-1. Each area is **self-contained**: a reviewer can analyze it without
-   needing simultaneous context on the other areas.
-2. Each area is **roughly balanced** in LOC (within 3x of the others).
-3. Areas are grouped by **layer or directory**, not arbitrarily.
-
-Heuristics to pick areas:
-
-- **Directory tree**: top-level subdirectories under the source root
-  often map cleanly onto areas (`parsers/`, `data/`, `metrics/`,
-  `models/`, `cli/`). Use this when the project is well-organized.
-- **Layer**: parsing → fetching → processing → classification →
-  presentation. Use this for layered architectures.
-- **Concern**: types/contracts, side-effecting code, pure math,
-  presentation. Use this when the directory tree is flat.
-- **Touched-by-the-diff**: in `--deep` over a PR, prefer the changed
-  files clustered by directory; pull in adjacent unchanged files only
-  if the change crosses an interface.
-
-State the area split explicitly to the user before launching, so they
-can correct it. This is also the point where you make clear that Deep
-Mode is about to spawn parallel review agents:
-
-```
-Deep review: 5 areas decomposed from src/
-  Area 1: parsers/ + models.py (~507 LOC) — input layer
-  Area 2: data/ (4 files, ~858 LOC) — reference-data fetch
-  Area 3: metrics/markout.py (~523 LOC) — decay math
-  Area 4: metrics/{holding,uniformity,clustering,brackets}.py + _* (~1488 LOC)
-  Area 5: profile.py (~1839 LOC) — classifier
-Spawning 5 parallel reviewer agents.
-```
-
-### Step D3: Extract canonical spec excerpts (CRITICAL)
-
-The most common deep-review failure mode is paraphrasing the spec in
-the reviewer prompt. The reviewer flags "deviations" from the
-paraphrase, not from the actual spec — every finding is then a
-strawman caused by the prompt. **Always quote spec excerpts verbatim
-from the source-of-truth document(s).**
-
-Locate canonical specs in this order, stopping at the first that
-exists:
-
-1. `<repo>/SPEC*.md`, `<repo>/SPECS*.md`, or named like
-   `TOXIC_TRADES_LAB_SPECS.md`
-2. `<repo>/.planning/PROJECT.md` and `<repo>/.planning/REQUIREMENTS.md`
-3. `<repo>/CLAUDE.md` and `<repo>/AGENTS.md`
-4. `<repo>/docs/*.md` if present
-5. `<repo>/README.md` as a last resort
-
-For each area, extract the relevant verbatim sections (e.g., for a
-markout area, copy SPEC §7.1 verbatim into the prompt; for a parser
-area, copy the broker-log format spec). Do not paraphrase. If the
-spec is silent on a point, say so explicitly in the prompt — that
-gives the reviewer permission to flag the silence as INFO without
-manufacturing bug findings.
-
-### Step D4: Spawn parallel reviewer agents
-
-For each area, launch an agent in parallel via the Agent tool with
-`subagent_type: "general-purpose"` (or whatever your harness calls it),
-`run_in_background: true`. Each agent's prompt should be self-contained
-and follow this skeleton:
-
-```markdown
-You are running an independent cross-review of one area of the
-<project name> codebase using <validator LLM> as the second reviewer.
-You are running in parallel with N–1 other reviewers covering different
-areas.
-
-# What you're reviewing
-
-Area: <descriptive name>
-Files:
-- <absolute path 1>
-- <absolute path 2>
-…
-
-Scope: <one-paragraph description of what this area is responsible for
-and why it matters to the project>.
-
-# Project context
-
-<Paste relevant CLAUDE.md / project rules: tone, no-sycophancy,
-preferred tools, anything load-bearing for review judgment>.
-
-# Verbatim spec excerpts (only source of truth)
-
-<Paste the relevant SPEC section(s) verbatim. Do NOT paraphrase.>
-
-# Your job
-
-1. Build a focused <validator LLM> prompt at /tmp/llm-review-<area>-prompt.md:
-   - Include the verbatim spec above.
-   - Include the full source of all in-scope files (use cat to append).
-   - Ask <validator LLM> for correctness/edge-case bugs anchored to the spec.
-   - Specify deep-dive categories tailored to this area.
-   - Output format: severity + spec-line + file:line + bug + concrete
-     trigger input + suggested fix.
-   - Hard rule: spec-anchored OR concrete-failure findings only;
-     no preference findings.
-
-2. Run <validator LLM>: e.g.,
-   `codex exec -s read-only --ephemeral -o /tmp/llm-review-<area>-output.txt - < /tmp/llm-review-<area>-prompt.md`
-   (timeout 600000)
-
-3. Read /tmp/llm-review-<area>-output.txt.
-
-4. Validate every finding by reading the cited code yourself.
-   Classify each as:
-   - CONFIRMED: code does what the LLM says, and that's a real bug
-   - STRAWMAN: LLM misread the spec or the code
-   - DEBATABLE: real ambiguity or judgment call
-
-5. Identify missing tests: for each CONFIRMED finding, check whether
-   an existing test would have caught it. If no, note "missing
-   regression test for <case>".
-
-6. Return a concise synthesis (≤600 words) with:
-   - 1-line description of what you reviewed
-   - Findings table: severity / area / file:line / verdict / failure mode
-   - Missing-test list (per CONFIRMED finding)
-   - Priority-ordered fix recommendation
-   - No-bug-found areas the LLM explicitly confirmed clean
-
-Clean up the temp files after extracting findings.
-
-# Important
-
-- Validate every finding before confirming. Garbage findings are
-  worse than no findings — they erode trust in the rest of the report.
-- Do not invent bugs. If everything checks out, say so plainly —
-  that is a real signal worth surfacing.
-- Temp file paths above are unique to this area; they will not
-  collide with other parallel agents.
-```
-
-The temp file paths must be **unique per area** (e.g.,
-`/tmp/llm-review-parser-prompt.md`, `/tmp/llm-review-data-prompt.md`,
-…) so parallel agents don't clobber each other.
-
-If a project doesn't have one of the artifacts the prompt references
-(no SPEC.md, no CLAUDE.md), tell the agent that explicitly so it
-falls back to general best-practices reasoning rather than
-hallucinating spec content.
-
-### Step D5: Aggregate as agents complete
-
-Each agent returns a self-contained synthesis. As they complete:
-
-1. Show the user a one-line summary per agent (severity counts +
-   verdict counts) so they see incremental progress.
-2. Don't try to re-validate findings the agent already validated.
-   Trust its CONFIRMED/STRAWMAN/DEBATABLE classification.
-3. Once all agents return, build the master synthesis.
-
-### Step D6: Master synthesis
-
-Aggregate all area-agent reports into a single document with:
-
-```markdown
-# Deep Cross-Review: <scope name>
-
-**Mode**: deep | **Areas**: N | **Primary↔Validator**: <claude>↔<codex>
-**Total findings**: M (X CONFIRMED, Y DEBATABLE, Z STRAWMAN)
-**Areas with no bugs found**: <list>
-
-## CONFIRMED — worth fixing (priority order)
-
-| # | Sev | Area | file:line | Bug | Fix | Missing test? |
-|---|---|---|---|---|---|---|
-| 1 | HIGH | Parser | ... | ... | ... | yes — <case> |
-| 2 | MED | … | … | … | … | yes/no |
-…
-
-## DEBATABLE — design choice or low reachability
-
-…
-
-## STRAWMAN — LLM misread the spec or code
-
-(brief, mostly for transparency about what was filtered out)
-
-## Missing test coverage summary
-
-For each CONFIRMED finding without a regression test, list the test
-that should be added (file + minimal scenario).
-
-## Per-area no-bug-found summary
-
-| Area | Categories the LLM explicitly cleared |
-|---|---|
-| Parser | UTC enforcement, frozen invariants, … |
-| Data layer | URL construction, atomic writes, … |
-| … | … |
-```
-
-End with a recommended next-step block:
-
-```
-Recommended next step:
-- Bundle the M CONFIRMED fixes (HIGH + MED) into one commit with
-  regression tests per finding. Want me to implement them now?
-- DEBATABLE items: leave as-is unless you want to revisit the design.
-- STRAWMAN items: filtered out, no action.
-```
-
-### Step D7: Clean up (deep mode)
-
-Each area-agent cleaned up its own temp files. Verify nothing leaked:
-
-```bash
-ls /tmp/llm-review-*-prompt.md /tmp/llm-review-*-output.txt 2>/dev/null
-# If anything remains, rm it.
-```
-
-### Anti-patterns (deep mode specifically)
-
-- **Paraphrasing spec content**: the most common cause of strawman
-  findings. Always quote verbatim.
-- **Identical prompts across areas**: each area's deep-dive categories
-  must be specific to its concerns. Generic prompts produce generic
-  findings.
-- **Skipping validation**: an unvalidated agent report is worth less
-  than a single inline review. The validation step is the entire point
-  of deep mode — do not skip it to save time.
-- **Letting agents review files they don't own**: parser agent should
-  not touch markout files, even if they're "related". Each agent owns
-  its slice.
-- **Re-running deep mode immediately after a fix commit**: the second
-  pass overlaps heavily with the first. Wait until the codebase has
-  meaningfully changed before re-running.
+Activated by `--deep` or by a request for a deep, multi-area, or
+parallel-agent review. Deep mode means focused parallel reviewer fanout, not
+one longer inline pass.
+
+Read `references/deep-mode.md` before running deep mode. If the current
+harness cannot launch parallel agents, say that strict deep mode is unavailable
+and clearly label any fallback as a normal comparative review.
 
 ## Error Handling
 

@@ -1,20 +1,22 @@
 ---
 name: code-reviewer
 description:
-  Use this skill to review code. It supports both local changes (staged or working tree)
-  and remote Pull Requests (by ID or URL). It focuses on correctness, maintainability,
-  and adherence to project standards.
+  Use this skill to review code changes, including local staged/unstaged changes
+  and remote pull requests by number or URL. Focus on bugs, security issues,
+  behavioral regressions, missing tests, maintainability, and project standards.
 ---
 
 # Code Reviewer
 
-This skill guides the agent in conducting professional and thorough code reviews for both local development and remote Pull Requests.
+Review code with a findings-first, evidence-backed approach. Prioritize real
+bugs and regressions over style commentary.
 
 ## Workflow
 
 ### 1. Determine Review Target
+
 *   **Remote PR**: If the user provides a PR number or URL (e.g., "Review PR #123"), target that remote PR.
-*   **Local Changes**: If no specific PR is mentioned, or if the user asks to "review my changes", target the current local file system states (staged and unstaged changes).
+*   **Local Changes**: If no specific PR is mentioned, or if the user asks to "review my changes", target staged and unstaged local changes.
 
 ### 2. Preparation
 
@@ -23,17 +25,16 @@ This skill guides the agent in conducting professional and thorough code reviews
     ```bash
     gh pr checkout <PR_NUMBER>
     ```
-2.  **Preflight**: Execute the project's standard verification suite to catch automated failures early.
-    ```bash
-    npm run preflight
-    ```
-3.  **Context**: Read the PR description and any existing comments to understand the goal and history.
+2.  **Context**: Read the PR title, description, changed file list, and relevant discussion to understand the goal and history.
+3.  **Project Instructions**: Read nearby project instructions (`AGENTS.md`, `CLAUDE.md`, or equivalent) before judging style or architecture.
+4.  **Verification Signals**: If the project has an obvious local verification command, note it and run it only when appropriate for the review scope and environment. Do not assume `npm run preflight` exists.
 
 #### For Local Changes:
 1.  **Identify Changes**:
     *   Check status: `git status`
     *   Read diffs: `git diff` (working tree) and/or `git diff --staged` (staged).
-2.  **Preflight (Optional)**: If the changes are substantial, ask the user if they want to run `npm run preflight` before reviewing.
+2.  **Project Instructions**: Read nearby project instructions (`AGENTS.md`, `CLAUDE.md`, or equivalent).
+3.  **Verification Signals**: Identify likely verification commands from package scripts, task runners, Makefiles, pyproject/poe tasks, Nx targets, or repo instructions. Run focused checks when useful and safe; otherwise state that verification was not run.
 
 ### 3. In-Depth Analysis
 Analyze the code changes based on the following pillars:
@@ -49,17 +50,17 @@ Analyze the code changes based on the following pillars:
 ### 4. Provide Feedback
 
 #### Structure
-*   **Summary**: A high-level overview of the review.
-*   **Findings**:
-    *   **Critical**: Bugs, security issues, or breaking changes.
-    *   **Improvements**: Suggestions for better code quality or performance.
-    *   **Nitpicks**: Formatting or minor style issues (optional).
+
+*   **Findings first**: Lead with issues, ordered by severity. Include file/line references, impact, and why the issue is real.
+*   **Severity labels**: Use Critical for bugs, security issues, or breaking changes; Improvement for meaningful quality or performance fixes; Nitpick only for small optional style comments.
+*   **Open Questions / Assumptions**: Only include if they affect the verdict.
+*   **Summary**: Brief change summary after findings, not before.
 *   **Conclusion**: Clear recommendation (Approved / Request Changes).
 
 #### Tone
-*   Be constructive, professional, and friendly.
+*   Be direct, professional, and specific.
 *   Explain *why* a change is requested.
-*   For approvals, acknowledge the specific value of the contribution.
+*   Do not pad the review with praise.
 
 ### 5. Cleanup (Remote PRs only)
-*   After the review, ask the user if they want to switch back to the default branch (e.g., `main` or `master`).
+*   If you checked out a remote PR, return to the previous branch unless the user asked to stay on the PR branch.

@@ -1,6 +1,6 @@
 ---
 name: llm-assist
-description: "Use this skill, rather than ad hoc CLI calls, whenever you want external LLM help for debugging, code review, planning, root cause analysis, fix verification, or rescue when stuck. The running agent should detect itself and default to the complementary model: Codex -> Claude, Claude -> Codex. If the running agent is OpenCode, ask the user which external model to use and offer to persist that preference in CLAUDE.md or AGENTS.md. Use OpenCode itself only when the user explicitly asks for it, or when Codex/Claude are unavailable and the user approves OpenCode as the fallback. This skill assembles a proper prompt file, includes project instructions, and safely invokes the external model. Trigger it for second opinions, cross-validation, independent verification, fresh architectural perspective, repeated failed attempts, uncertainty about platform-specific behavior, or whenever the user explicitly asks for external help, Claude/Codex review, OpenCode review, or a second opinion."
+description: "Use this skill instead of ad hoc CLI calls when external LLM help is needed for debugging, code review, planning, root cause analysis, fix verification, rescue after repeated failures, or a second opinion. Default to the complementary model: Codex -> Claude, Claude -> Codex. Ask which provider to use when running inside OpenCode. Use OpenCode only when explicitly requested or approved as a fallback. The skill builds a prompt file, includes project instructions, invokes the external model safely, and synthesizes the result."
 ---
 
 # LLM Assist
@@ -9,8 +9,8 @@ Spawn an external LLM CLI as an independent thinking partner. The external
 tool runs headlessly, investigates the problem with its own tools, and
 returns findings for you to synthesize with your own analysis.
 
-This gives cross-model validation — different models catch different
-blind spots, eliminating sycophancy bias and local minima.
+This gives cross-model validation: different models catch different blind
+spots and can reduce sycophancy bias and local minima.
 
 ## Provider Selection
 
@@ -30,7 +30,7 @@ Default behavior:
 |----------|-------------|----------|---------|------|
 | `claude` | Default external provider when the current agent is Codex | Claude Code CLI | `npm i -g @anthropic-ai/claude-code` | Claude Code auth |
 | `codex` | Default external provider when the current agent is Claude | OpenAI Codex CLI | `npm i -g @openai/codex` | ChatGPT subscription or OpenAI API key |
-| `opencode` | Explicit opt-in, or approved fallback when Claude/Codex is unavailable | OpenCode CLI | `npm i -g opencode` | Configured via `~/.config/opencode/opencode.json` (provider + model) |
+| `opencode` | Explicit opt-in, or approved fallback when Claude/Codex is unavailable | OpenCode CLI | `npm i -g opencode-ai` | Configured via `opencode providers` or `~/.config/opencode/opencode.json` |
 | `all` | Explicit cross-check with the standard pair | Claude Code CLI + OpenAI Codex CLI | Both installed | Both configured |
 
 Usage examples:
@@ -51,6 +51,8 @@ The selected CLI must be installed and authenticated. If a command fails
 with "command not found", tell the user to install it (see table above).
 For `--provider all`, both Claude and Codex must be available.
 
+Read `references/provider-invocation.md` before running provider CLI commands.
+
 ## Prefer This Skill Over Shortcuts
 
 - Do not bypass this skill with ad hoc direct CLI calls when the task clearly
@@ -66,28 +68,11 @@ For `--provider all`, both Claude and Codex must be available.
 
 ## Wait Before Coding
 
-- After invoking the external LLM, do not start new code changes until you
-  have received its reply or the invocation has clearly failed.
-- Give the external LLM a reasonable amount of time to complete before
-  concluding that it is stuck. Default to a long timeout such as 10 minutes for
-  substantial prompts.
-- While waiting, monitor actual progress rather than assuming a hang from a
-  quiet terminal.
-- Treat provider silence as ambiguous, not as failure. In particular,
-  `claude -p` and similar single-shot CLIs may remain silent until they finish.
-- If the process is still alive, prefer continued monitoring over killing it.
-- Only proceed without the reply if the invocation genuinely fails, times out
-  after a reasonable wait, or the user explicitly tells you to continue.
-- Do not shrink the prompt and rerun just because the original invocation is
-  quiet. That wastes time and tokens. Prefer waiting for the original run to
-  complete while monitoring it properly.
-- Do not use `nohup`, `disown`, or other detached/background launch patterns
-  for quiet providers such as Claude unless that exact provider/flag
-  combination has already been proven to work reliably in the current
-  environment.
-- Prefer a directly monitored foreground run for Claude-style CLIs. If you must
-  background a process, keep it in the current shell session, capture the real
-  child PID, and continue monitoring that same process until completion.
+After invoking the external LLM, wait for its reply or a clear failure before
+starting new code changes. Treat quiet output as ambiguous, not as a hang:
+monitor the process and output file before retrying or killing it. Continue
+without the reply only if the invocation fails, times out after a reasonable
+wait, or the user explicitly tells you to continue.
 
 ## Modes
 
@@ -253,213 +238,13 @@ sections (architecture docs, build commands) if over 4KB.]
 
 ### 3. Run the external LLM
 
-Write output to a local file and stream that file in real time so you can
-observe progress while the command is still running. Prefer line-buffered
-streaming with `stdbuf` where available and mirror stderr into the same file.
+Choose the command based on the selected `--provider`. Read
+`references/provider-invocation.md` for current install commands, safe CLI
+invocation patterns, monitoring, and failure handling.
 
-Before the real run, validate any provider-specific streaming flags or output
-format requirements with a tiny sanity check when you are using a new launch
-pattern. This is especially important for Claude, where combinations such as
-`--output-format stream-json` may require additional flags.
-
-Example sanity check:
-
-```bash
-claude -p --verbose --output-format stream-json --include-partial-messages \
-  'Reply with exactly OK.'
-```
-
-If the sanity check fails, fix the invocation first. Do not launch the real
-prompt until the provider/flag combination is known-good.
-
-For long-running or quiet providers, always create a sidecar metadata file so
-you can monitor the real LLM process, not just the wrapper shell. Record at
-least: provider, PID, prompt file, output file, and start time.
-
-Preferred monitoring pattern for quiet providers:
-
-```bash
-PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-prompt.XXXXXX")
-OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-result.XXXXXX")
-META_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-meta.XXXXXX")
-STATUS_FILE=$(mktemp "${TMPDIR:-/tmp}/llm-assist-status.XXXXXX")
-test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE" && test -e "$META_FILE" && test -e "$STATUS_FILE"
-case "$PROMPT_FILE $OUTPUT_FILE $META_FILE $STATUS_FILE" in
-  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
-esac
-
-claude_cmd=(
-  claude
-  -p
-  --verbose
-  --output-format
-  stream-json
-  --include-partial-messages
-)
-
-{
-  stdbuf -oL -eL "${claude_cmd[@]}" < "$PROMPT_FILE"
-} 2>&1 | tee -a "$OUTPUT_FILE" &
-PIPE_PID=$!
-
-cat > "$META_FILE" <<EOF
-provider=claude
-pid=$PIPE_PID
-prompt=$PROMPT_FILE
-output=$OUTPUT_FILE
-status=$STATUS_FILE
-started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-EOF
-
-wait "$PIPE_PID"
-PIPE_STATUS=$?
-printf '%s\n' "$PIPE_STATUS" > "$STATUS_FILE"
-```
-
-Use the metadata to monitor the process while it runs:
-- `ps -o pid=,etime=,pcpu=,state=,command= -p "$PIPE_PID"`
-- `wc -c "$OUTPUT_FILE"` and `tail -n 20 "$OUTPUT_FILE"`
-- `lsof -p "$PIPE_PID"` when you need to distinguish a live-but-quiet process
-  from a deadlocked or blocked one
-
-Do not kill a quiet process just because the output file has not grown yet.
-Kill only when there is strong evidence of failure, such as:
-- the process exited non-zero
-- the command exceeded the agreed wait budget
-- the process is no longer alive
-- there is clear provider-specific evidence of a stuck state
-
-Safe monitoring pattern:
-
-```bash
-PROMPT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-assist-prompt.XXXXXX.md")
-OUTPUT_FILE=$(mktemp "${TMPDIR:-/tmp}/codex-assist-result.XXXXXX.txt")
-test -e "$PROMPT_FILE" && test -e "$OUTPUT_FILE"
-case "$PROMPT_FILE $OUTPUT_FILE" in
-  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
-esac
-
-codex_cmd=(codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" -)
-
-{
-  stdbuf -oL -eL "${codex_cmd[@]}" < "$PROMPT_FILE"
-} 2>&1 | tee -a "$OUTPUT_FILE"
-```
-
-If the provider already writes directly to an output file, keep that file and
-monitor it with `tail -f "$OUTPUT_FILE"` from a second process while the main
-command runs.
-
-Choose the command based on the selected `--provider`.
-
-#### Claude
-
-Use Claude as the default external provider when this skill runs inside
-Codex, or whenever `--provider claude` is selected:
-
-```bash
-claude_cmd=(
-  claude
-  -p
-  --verbose
-  --output-format
-  stream-json
-  --include-partial-messages
-)
-
-{
-  stdbuf -oL -eL "${claude_cmd[@]}" < "$PROMPT_FILE"
-} 2>&1 | tee -a "$OUTPUT_FILE"
-```
-
-Prefer this streaming mode for long-running prompts so `STATUS:` markers and
-partial output can be observed in real time.
-
-#### Codex
-
-Use Codex as the default external provider when this skill runs inside
-Claude, or whenever `--provider codex` is selected.
-
-All modes except rescue use read-only sandbox:
-
-```bash
-codex exec \
-  -s read-only \
-  --ephemeral \
-  -o "$OUTPUT_FILE" \
-  - < "$PROMPT_FILE"
-```
-
-For **rescue** mode (may need to edit files):
-
-```bash
-codex exec \
-  -s workspace-write \
-  --ephemeral \
-  -o "$OUTPUT_FILE" \
-  - < "$PROMPT_FILE"
-```
-
-#### OpenCode
-
-Only use OpenCode when the user explicitly asks for it, or when Claude/Codex
-is unavailable and the user approves OpenCode as the fallback.
-
-OpenCode uses `run` for non-interactive execution. Attach the prompt file
-with `-f` to avoid shell argument length limits on long prompts. Prefer
-`--format json` when you want event-style output captured in real time:
-
-```bash
-opencode_cmd=(
-  opencode
-  run
-  "Follow the instructions in the attached file"
-  -f
-  "$PROMPT_FILE"
-  --format
-  json
-)
-"${opencode_cmd[@]}" > "$OUTPUT_FILE" 2>&1
-```
-
-> OpenCode does not have per-invocation sandbox flags. It uses its own
-> permission system configured in `~/.config/opencode/opencode.json`.
-> For rescue mode, ensure write permissions are enabled.
->
-> The default output includes a header line (`> build · model-name`).
-> Strip it when parsing: `tail -n +3 "$OUTPUT_FILE"`.
-
-#### All (Codex + Claude)
-
-Run the standard pair in parallel Bash calls, with separate output files:
-
-```bash
-CLAUDE_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/claude-result.XXXXXX")
-CODEX_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/codex-result.XXXXXX")
-test -e "$CLAUDE_OUTPUT" && test -e "$CODEX_OUTPUT"
-case "$CLAUDE_OUTPUT $CODEX_OUTPUT" in
-  *XXXXXX*) echo "mktemp did not resolve correctly" >&2; exit 1 ;;
-esac
-
-# Run in parallel
-claude -p --verbose --output-format stream-json --include-partial-messages < "$PROMPT_FILE" > "$CLAUDE_OUTPUT" 2>&1 &
-codex_cmd=(codex exec -s read-only --ephemeral -o "$CODEX_OUTPUT" -)
-"${codex_cmd[@]}" < "$PROMPT_FILE" &
-wait
-```
-
-Set `timeout: 600000` (10 minutes) on the Bash call.
-
-If a command fails, check:
-
-| Error | Action |
-|-------|--------|
-| `claude: command not found` | Tell user: `npm i -g @anthropic-ai/claude-code` |
-| `codex: command not found` | Tell user: `npm i -g @openai/codex` |
-| `opencode: command not found` | Tell user: `npm i -g opencode` |
-| Preferred Claude/Codex CLI unavailable | Offer OpenCode as a fallback only if the user approves using it |
-| Auth/API error | Tell user to check auth config for the failing provider |
-| Timeout | Report partial results if output file has content |
+Always write provider output to a local file. For long-running providers,
+record enough metadata to monitor the real process. Quiet output is not
+failure; check process state and output before retrying.
 
 ### 4. Read and synthesize results
 
@@ -472,7 +257,7 @@ with its source: **CLAUDE**, **CODEX**, or **BOTH** (found by both).
 - Parse findings from each provider
 - Compare each finding against your own analysis
 - Label each as: CONFIRMED (you + provider agree), PROVIDER-ONLY (provider
-  found, you missed), CLAUDE-ONLY (you found, provider missed), or
+  found, you missed), CALLER-ONLY (you found, provider missed), or
   DISAGREEMENT (conflicting conclusions)
 - When using `all`: cross-compare provider findings too — issues found by
   both providers have highest confidence

@@ -1,12 +1,12 @@
 # claude-skills
 
-A collection of agent skills for cross-model code review, debugging, and validation. Works with Claude Code, Cursor, Cline, Codex, and other AI coding agents that support the [Agent Skills](https://github.com/anthropics/skills) format.
+A collection of Agent Skills for cross-model code review, debugging, and validation. These skills target agents that support the [Agent Skills](https://agentskills.io/) format or can load `SKILL.md` folders.
 
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
-| [llm-assist](skills/llm-assist/) | Spawn an external LLM CLI (Codex or OpenCode) as a cross-model thinking partner for review, debug, plan, verify, RCA, rescue, and ask modes |
+| [llm-assist](skills/llm-assist/) | Spawn an external LLM CLI (Claude, Codex, or OpenCode) as a cross-model thinking partner for review, debug, plan, verify, RCA, rescue, and ask modes |
 | [cross-review-pr](skills/cross-review-pr/) | Bidirectional comparative PR review between any two LLMs (Claude, Codex, OpenCode) with cross-validation and confidence scoring |
 | [code-reviewer](skills/code-reviewer/) | Structured code review for local changes and remote PRs (based on [google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) code-reviewer) |
 
@@ -26,13 +26,16 @@ npx skills add wnz99/claude-skills/cross-review-pr -g
 npx skills add wnz99/claude-skills/code-reviewer -g
 ```
 
-Or manually copy any `skills/<name>/` directory to `~/.claude/skills/`.
+Or manually copy any `skills/<name>/` directory to your agent's skills
+directory, such as `~/.claude/skills/`, `~/.codex/skills/`, or
+`~/.agents/skills/`.
 
 ## Prerequisites
 
 - **llm-assist** and **cross-review-pr** require at least one external LLM CLI installed:
+  - [Claude Code](https://code.claude.com/docs/en/cli-reference): `npm i -g @anthropic-ai/claude-code && claude auth login`
   - [Codex CLI](https://github.com/openai/codex): `npm i -g @openai/codex && codex login`
-  - [OpenCode](https://github.com/opencode-ai/opencode): follow their install instructions
+  - [OpenCode](https://dev.opencode.ai/docs/): `npm i -g opencode-ai`
 - **cross-review-pr** also requires [GitHub CLI](https://cli.github.com/) (`gh`) installed and authenticated
 - **code-reviewer** works standalone with no extra dependencies
 
@@ -46,7 +49,7 @@ These skills are designed to complement each other:
 
 **cross-review-pr** supports any combination of Claude, Codex, and OpenCode as primary reviewer or validator via `--from` / `--to` flags. The default is `--from claude --to codex`. Running `--from codex --to claude` reverses the roles — Codex reviews first, Claude validates.
 
-The cross-model approach eliminates sycophancy bias and catches bugs that any single model might miss.
+The cross-model approach helps reduce sycophancy bias and can catch bugs that any single model might miss.
 
 ## Attribution
 
