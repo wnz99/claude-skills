@@ -1,6 +1,6 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a pull request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep review, multi-area review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
+description: "Cross-model comparative PR / Pull Request review of a PR, branch, commit, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative PR review, comparative review, PR cross-review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep PR review, deep review, multi-area review, parallel-agent PR review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
 ---
 
 # Cross-Review PR
