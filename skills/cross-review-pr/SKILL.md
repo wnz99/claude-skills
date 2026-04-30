@@ -1,6 +1,6 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative review of a Pull Request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude<->Codex. Supports any combination of Claude, Codex, and OpenCode via --from/--to flags. The optional --deep flag triggers a multi-agent multi-area review: 4–5 parallel reviewer agents, each covering a distinct code area with strict spec-anchored prompts, finding validation, and missing-test gap analysis. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', 'deep review', 'multi-area review', 'parallel-agent review', or wants two LLMs to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', 'compare reviews', or 'run a deep cross-review'."
+description: "Cross-model comparative review of a Pull Request, branch, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude<->Codex. Supports any combination of Claude, Codex, and OpenCode via --from/--to flags. Deep means parallel-agent fanout: if the user asks for a 'deep PR review', 'deep comparative review', 'deep cross-review', 'multi-area review', or uses --deep, treat that as a request to spawn 4–5 parallel reviewer agents, each focused on a distinct review area with strict spec-anchored prompts, finding validation, and missing-test gap analysis. Trigger this skill when the user asks for a 'comparative review', 'cross-review', 'dual review', 'cross-model review', 'validated review', 'second-opinion review', 'deep review', 'multi-area review', 'parallel-agent review', or wants two LLMs to review a PR together. Also trigger when the user says 'review PR with Codex', 'review PR with OpenCode', 'get a second opinion on this PR', 'compare reviews', or 'run a deep cross-review'."
 ---
 
 # Cross-Review PR
@@ -55,7 +55,9 @@ If the role is a *different* LLM, you invoke it via its CLI.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
 - **--deep** (optional): Run the multi-agent multi-area review described
-  in the **Deep Mode** section below. Each area is reviewed by an
+  in the **Deep Mode** section below. The word "deep" in the user's
+  request is equivalent to passing `--deep`; do not interpret it as a
+  generic request for extra thoroughness. Each area is reviewed by an
   independent parallel agent that internally runs the same primary/validator
   cross-review on its slice of code. Default areas: 5. Override with
   `--areas N`.
@@ -393,12 +395,27 @@ git checkout - 2>/dev/null || true
 
 ## Deep Mode
 
-Activated by `--deep`. The standard mode runs one primary + one validator
-over the full scope. Deep mode decomposes the scope into 4–5 distinct
-**focus areas** and runs an independent reviewer agent per area in
-parallel. Each area-agent then runs its own primary/validator
-cross-review on its slice — so the user gets a multi-agent multi-area
-synthesis instead of a single global review.
+Activated by `--deep` or by the user using the word "deep" for the PR
+review. In this skill, **deep has one precise meaning**: spawn parallel
+reviewer agents, each focused on a specific review area. The standard
+mode runs one primary + one validator over the full scope. Deep mode
+decomposes the scope into 4–5 distinct **focus areas** and runs an
+independent reviewer agent per area in parallel. Each area-agent then
+runs its own primary/validator cross-review on its slice, so the user
+gets a multi-agent multi-area synthesis instead of a single global
+review.
+
+Do not satisfy a deep review by doing one longer inline pass. The point
+of Deep Mode is to split attention across multiple focused reviewers so
+bugs, correctness issues, integration gaps, and missing tests buried in
+a large corpus are less likely to be missed by one agent carrying the
+entire diff in a single context.
+
+If the current harness cannot spawn parallel agents, say that strict
+Deep Mode is unavailable in this environment before continuing. Then
+either ask for explicit permission/alternative tooling if the harness
+requires it, or clearly label the fallback as a non-deep comparative
+review.
 
 The empirical reason this exists: a single reviewer pass over a large
 diff produces shallow generic findings; the reviewer's attention is
@@ -434,7 +451,7 @@ Resolve the scope argument into a concrete file list:
 
 If the resolved file list exceeds 50 files or 10,000 LOC, ask the user
 to confirm before proceeding (deep mode will spawn many parallel
-agents and take 10–20 minutes).
+agents).
 
 ### Step D2: Decompose into focus areas
 
@@ -460,7 +477,8 @@ Heuristics to pick areas:
   if the change crosses an interface.
 
 State the area split explicitly to the user before launching, so they
-can correct it:
+can correct it. This is also the point where you make clear that Deep
+Mode is about to spawn parallel review agents:
 
 ```
 Deep review: 5 areas decomposed from src/
@@ -469,7 +487,7 @@ Deep review: 5 areas decomposed from src/
   Area 3: metrics/markout.py (~523 LOC) — decay math
   Area 4: metrics/{holding,uniformity,clustering,brackets}.py + _* (~1488 LOC)
   Area 5: profile.py (~1839 LOC) — classifier
-Spawning 5 parallel reviewer agents. Expected runtime: 10–15 min.
+Spawning 5 parallel reviewer agents.
 ```
 
 ### Step D3: Extract canonical spec excerpts (CRITICAL)
