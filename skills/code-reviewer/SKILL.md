@@ -64,6 +64,41 @@ Analyze the code changes based on the following pillars:
 *   **Edge Cases and Error Handling**: Does the code appropriately handle edge cases and potential errors?
 *   **Testability**: Is the new or modified code adequately covered by tests (even if preflight checks pass)? Suggest additional test cases that would improve coverage or robustness.
 
+#### Deep Cross-File Impact Analysis
+
+When a change affects exported or externally consumed behavior, trace the
+relevant call and dependency paths across files instead of reviewing each file
+in isolation. Apply this to public functions, classes, modules, components,
+handlers, CLI commands, jobs, adapters, shared types, configuration contracts,
+persistence boundaries, external SDK/API calls, and documented invariants.
+
+Build a lightweight directed map of the relevant program flow:
+
+*   **Nodes**: Changed functions/classes/modules and important callers/callees.
+*   **Edges**: Imports, direct calls, interface implementations, inheritance,
+    dependency injection, factory/registry resolution, event/subscription
+    wiring, routing, reflection, dynamic loading, or external API/SDK calls.
+
+Walk the graph far enough to reach the user-facing entrypoint, persistence
+boundary, external system boundary, or invariant boundary. Check whether intent
+and contracts still propagate correctly across the chain, including:
+
+*   Flags and modes such as force, dry-run, overwrite, locking, retry,
+    pagination, authentication, authorization, caching, and idempotency.
+*   Argument shape, return shape, nullability, error behavior, async/concurrency
+    behavior, side effects, ordering assumptions, and resource ownership.
+*   Semantic contract drift that type checkers may miss, especially around
+    loose types, raw maps/dictionaries, JSON-like metadata, generated records,
+    optional fields, erased generics, unchecked casts, or untyped external data.
+*   Runtime reachability through dynamic mechanisms such as plugin loaders,
+    registries, factories, service locators, reflection, string-based routing,
+    dynamic imports/requires, or dependency injection containers.
+
+For dynamic paths that cannot be proven statically, state the uncertainty and
+name the runtime mechanism involved. Report concrete breakages, brittle
+implicit contracts, or high-risk unverified paths; do not expand into unrelated
+whole-repo review.
+
 ### 4. Provide Feedback
 
 #### Structure
