@@ -229,6 +229,14 @@ As agents complete, show a one-line status per area: severity counts and
 CONFIRMED/DEBATABLE/STRAWMAN counts. Trust each agent's validated
 classification unless there is an obvious contradiction in the synthesis.
 
+If any area reviewer invokes an external CLI such as Claude Code or OpenCode,
+do not stop that process just because it is taking a long time. Monitor process
+state, elapsed time, output-file size, and recent output. Slow-but-progressing
+external review work is not a hang. If progress is ambiguous, ask the user
+whether to keep waiting or stop, and include enough detail for an informed
+decision: elapsed time, process state, output size, recent output summary, and
+what would be lost by stopping.
+
 Master report:
 
 ```markdown

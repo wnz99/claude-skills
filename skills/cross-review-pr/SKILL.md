@@ -239,7 +239,26 @@ claude -p "Follow the instructions provided on stdin." \
   < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 ```
 
-Set `timeout: 600000` (10 minutes) on the Bash call.
+Use a generous wait budget for external reviewer CLIs, but do not treat a
+long-running process as hung merely because it is slow or quiet. Claude Code and
+OpenCode may spend several minutes reading files, using tools, or streaming
+machine-readable events before producing a final review. Monitor progress before
+deciding what to do:
+
+```bash
+ps -o pid=,etime=,pcpu=,state=,command= -p "$REVIEWER_PID"
+wc -c "$OUTPUT_FILE"
+tail -n 40 "$OUTPUT_FILE"
+```
+
+If output size is increasing, tool-use events are appearing, CPU is non-zero, or
+the process is otherwise doing work, keep waiting and tell the user what
+progress you see. If progress is ambiguous, ask the user whether to keep waiting
+or stop the process, and include enough detail for an informed decision:
+elapsed time, output-file size, recent output summary, process state, and what
+result would be lost by stopping. Only kill an external reviewer without asking
+when it has clearly exited badly, is an obvious orphan, or the user explicitly
+instructs you to stop it.
 
 Parse the output into the same structured findings format.
 
@@ -324,7 +343,10 @@ claude -p "Follow the instructions provided on stdin." \
   < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 ```
 
-Set `timeout: 600000` (10 minutes) on the Bash call.
+Use the same monitoring rule as primary review for external validators: slow is
+not hung. Keep waiting while Claude Code, Codex, or OpenCode is making progress;
+if unsure, ask the user whether to wait or stop and provide elapsed time, output
+size, recent output summary, and process state.
 
 #### Handle failure gracefully
 
@@ -472,7 +494,8 @@ and clearly label any fallback as a normal comparative review.
 | PR not found | Check PR number/URL and repo |
 | `--from` and `--to` are the same | Error: primary and validator must be different LLMs |
 | External LLM not installed | If it's the primary, abort with install instructions. If it's the validator, present primary review alone. |
-| External LLM timeout | Same as not installed — degrade gracefully if validator, abort if primary |
+| External LLM appears slow | Monitor process/output. If progressing, keep waiting. If ambiguous, ask the user whether to wait or stop with elapsed time, output size, recent output summary, and process state. Applies to Claude Code, Codex, and OpenCode. |
+| External LLM timeout with no progress | Ask the user before killing unless the process clearly failed or they already instructed you to stop. If stopped, present partial output only if clearly marked incomplete. |
 | External LLM auth error | Tell user to check auth config for the selected provider |
 | Diff too large (>5000 lines) | Split by file groups and run sequentially |
 
