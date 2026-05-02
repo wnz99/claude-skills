@@ -1,14 +1,15 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative PR / Pull Request review of a PR, branch, commit, or codebase scope. Runs one LLM as primary reviewer and another as validator. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative PR review, comparative review, PR cross-review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep PR review, deep review, multi-area review, parallel-agent PR review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
+description: "Cross-model comparative PR / Pull Request review of a PR, branch, commit, or codebase scope. Runs two LLMs through independent reviews and reciprocal validation, then synthesizes cross-checked findings. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative PR review, comparative review, PR cross-review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep PR review, deep review, multi-area review, parallel-agent PR review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
 ---
 
 # Cross-Review PR
 
 Run a comparative code review on a Pull Request using two independent models.
-The value is in cross-validation: different model architectures have different
-blind spots, so issues found by both models are high-confidence, while
-single-model findings get scrutinized for false positives.
+The value is in reciprocal cross-validation: each model reviews independently,
+then checks the other model's findings. Issues found or confirmed by both
+models are high-confidence, while single-model findings get scrutinized for
+false positives before the final report.
 
 ## Supported LLMs
 
@@ -26,7 +27,7 @@ out to an external CLI.
 
 - If you are **Claude**: `claude` roles run inline (use `code-reviewer` skill
   or direct analysis). `codex` and `opencode` roles shell out via their CLIs.
-- If you are **Codex**: `codex` roles run inline (do the review/validation
+- If you are **Codex**: `codex` roles run inline (do the review and validation
   yourself). `claude` and `opencode` roles shell out via their CLIs.
 - If you are **OpenCode**: `opencode` roles run inline. `claude` and `codex`
   roles shell out via their CLIs.
@@ -38,8 +39,8 @@ If the role is a *different* LLM, you invoke it via its CLI.
 ## Prerequisites
 
 - `gh` CLI installed and authenticated (for PR checkout and metadata)
-- External LLM CLIs installed for whichever models are selected
-  (not needed when both `--from` and `--to` are `claude`)
+- External LLM CLIs installed for whichever selected reviewer is not the
+  invoking LLM
 - Project has a CLAUDE.md with coding standards (strongly recommended)
 
 ## Arguments
@@ -48,9 +49,10 @@ If the role is a *different* LLM, you invoke it via its CLI.
   (e.g., `https://github.com/org/repo/pull/47`). In `--deep` mode the
   scope can also be a branch range (`main..HEAD`), a directory path
   (`src/`), or omitted (review the entire `src/` tree).
-- **--from PRIMARY** (optional): LLM that performs the initial review.
+- **--from REVIEWER_A** (optional): LLM that performs the first independent review.
   Values: `claude` (default), `codex`, `opencode`.
-- **--to VALIDATOR** (optional): LLM that validates and adds its own findings.
+- **--to REVIEWER_B** (optional): LLM that performs the second independent review
+  and participates in reciprocal validation.
   Values: `codex` (default), `claude`, `opencode`.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
@@ -74,7 +76,7 @@ If the role is a *different* LLM, you invoke it via its CLI.
 |-----------|------------|
 | (default) | `--from claude --to codex` |
 | `--from codex` | `--from codex --to claude` |
-| `--from opencode --to codex` | OpenCode reviews, Codex validates |
+| `--from opencode --to codex` | OpenCode and Codex cross-review |
 
 When only one of `--from`/`--to` is provided, the other defaults to the
 opposite side of the Claude<->Codex pair. If the provided value is `claude`,
@@ -83,7 +85,7 @@ the other defaults to `codex` and vice versa. If the provided value is
 
 ## Workflow
 
-### Step 0: Terminal Awareness
+### Step 1: Terminal Awareness
 
 Before gathering diffs or generating prompt files, inspect the active terminal
 environment and choose commands that are safe for that shell:
@@ -119,7 +121,7 @@ If the prompt is unexpectedly short or lacks source/diff markers, stop and
 regenerate it under a known-safe shell before running Claude, Codex, or
 OpenCode. Do not launch reviewers against empty or placeholder prompts.
 
-### Step 0b: Deep-mode delegation authorization
+### Step 2: Deep-Mode Delegation Authorization
 
 If `--deep` is active, read `references/deep-mode.md` before proceeding.
 Strict deep mode requires independent parallel reviewer agents. In environments
@@ -142,7 +144,7 @@ Do not silently fall back to one inline pass, local-only validation, or only
 external CLI processes. If the user declines sub-agents, ask whether they want
 a non-deep comparative fallback and label that fallback clearly.
 
-### Step 1: Gather PR context
+### Step 3: Gather PR Context
 
 Extract the PR number from the argument. If it's a URL, parse the number from it.
 
@@ -160,25 +162,24 @@ gh pr diff "$PR_NUM" > /tmp/cross-review-pr-diff.patch
 Read the PR title, description, base branch, and changed file list from the
 metadata. Show the user a brief summary before proceeding:
 
-```
+```text
 Comparative review: PR #47 — "feat(27): backpressure pipeline"
 Base: develop <- gsd/phase-27-backpressure-frame-dropping
 Files changed: 12
-Primary reviewer: claude | Validator: codex
+Reviewer A: claude | Reviewer B: codex
+Mode: independent reviews + reciprocal validation
 ```
 
 If the diff exceeds 3000 lines, warn the user and suggest using `--focus`
 to narrow scope. Proceed anyway unless they stop you.
 
-### Step 2: Primary review
+### Step 4: Reviewer A Independent Review
 
-Run the primary review using whichever LLM is selected via `--from`.
-Apply the **self-awareness rule**: if `--from` matches your own identity,
-you are the primary reviewer — do it inline. Otherwise, shell out.
+Run the first independent review using whichever LLM is selected via `--from`.
+Apply the **self-awareness rule**: if `--from` matches your own identity, do it
+inline. Otherwise, shell out.
 
-#### If primary is YOU (inline)
-
-Checkout the PR branch so you have full file access:
+If the reviewer is YOU, check out the PR branch so you have full file access:
 
 ```bash
 gh pr checkout "$PR_NUM"
@@ -186,13 +187,12 @@ gh pr checkout "$PR_NUM"
 
 If you have a `code-reviewer` skill installed, use that skill's workflow.
 Otherwise, review the diff directly. Produce a structured list where each
-finding has: severity (Critical/Improvement/Nitpick), file, location,
-title, and description. End with an overall verdict: Approved or Request Changes.
+finding has: severity (Critical/Improvement/Nitpick), file, location, title,
+description, and suggested fix. End with an overall verdict: Approved or
+Request Changes.
 
-#### If primary is a DIFFERENT LLM (external CLI)
-
-Build a review prompt file following the `llm-assist` skill's review mode
-template. The prompt structure is:
+If the reviewer is a DIFFERENT LLM, build a review prompt file following the
+`llm-assist` skill's review mode template:
 
 1. **Common Header** — CLAUDE.md project conventions (mandatory per llm-assist)
 2. **Skill Preference** — code-reviewer detection preamble (from llm-assist)
@@ -200,14 +200,16 @@ template. The prompt structure is:
 4. **Focus** — user-specified or general
 
 ```markdown
-## Task: Code Review
+## Task: Independent Code Review
 
-Review the following Pull Request diff. For each issue found, output:
+Review the following Pull Request diff independently. Do not assume another
+reviewer will catch issues. For each issue found, output:
 - severity: Critical / Improvement / Nitpick
 - file: <path>
 - location: <line or range>
 - title: <short title>
 - description: <explanation>
+- suggested_fix: <concrete remediation>
 
 At the end, give an overall verdict: Approved or Request Changes.
 
@@ -216,22 +218,22 @@ At the end, give an overall verdict: Approved or Request Changes.
 </pr-diff>
 ```
 
-Run via the appropriate CLI for the `--from` LLM:
+Run via the appropriate CLI for the reviewer LLM:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-primary-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-primary-result-XXXXXX)
+PROMPT_FILE=$(mktemp /tmp/cross-review-reviewer-a-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-reviewer-a-result-XXXXXX)
 
 # Write assembled prompt to PROMPT_FILE
 
-# If --from is codex:
+# If reviewer is codex:
 codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
 
-# If --from is opencode:
+# If reviewer is opencode:
 opencode run "Follow the instructions in the attached file" \
   -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
 
-# If --from is claude (and you are NOT Claude):
+# If reviewer is claude and you are NOT Claude:
 claude -p "Follow the instructions provided on stdin." \
   --verbose \
   --output-format stream-json \
@@ -240,10 +242,8 @@ claude -p "Follow the instructions provided on stdin." \
 ```
 
 Use a generous wait budget for external reviewer CLIs, but do not treat a
-long-running process as hung merely because it is slow or quiet. Claude Code and
-OpenCode may spend several minutes reading files, using tools, or streaming
-machine-readable events before producing a final review. Monitor progress before
-deciding what to do:
+long-running process as hung merely because it is slow or quiet. Monitor
+progress before deciding what to do:
 
 ```bash
 ps -o pid=,etime=,pcpu=,state=,command= -p "$REVIEWER_PID"
@@ -254,193 +254,197 @@ tail -n 40 "$OUTPUT_FILE"
 If output size is increasing, tool-use events are appearing, CPU is non-zero, or
 the process is otherwise doing work, keep waiting and tell the user what
 progress you see. If progress is ambiguous, ask the user whether to keep waiting
-or stop the process, and include enough detail for an informed decision:
-elapsed time, output-file size, recent output summary, process state, and what
-result would be lost by stopping. Only kill an external reviewer without asking
-when it has clearly exited badly, is an obvious orphan, or the user explicitly
-instructs you to stop it.
+or stop and include elapsed time, output-file size, recent output summary,
+process state, and what result would be lost by stopping. Only kill an external
+reviewer without asking when it has clearly exited badly, is an obvious orphan,
+or the user explicitly instructs you to stop it.
 
 Parse the output into the same structured findings format.
+If Reviewer A fails because the CLI is unavailable, auth is broken, or the
+process exits badly, stop the comparative workflow and report the failure. Do
+not continue to reciprocal validation with only one completed review.
 
-### Step 3: Validation review
+### Step 5: Reviewer B Independent Review
 
-Send the primary review's findings to the validator LLM, along with the
-PR diff for its own independent review. Apply the **self-awareness rule**:
-if `--to` matches your own identity, you are the validator — do it inline.
-Otherwise, shell out.
+Run the second independent review using whichever LLM is selected via `--to`.
+Apply the **self-awareness rule** exactly as in Step 4.
 
-#### If validator is YOU (inline)
+Reviewer B must not receive Reviewer A's findings yet. Give it the same PR
+metadata, project conventions, focus, and diff, but no cross-validation task.
+This preserves independence and avoids anchoring.
 
-You already have the PR diff and branch checked out. Perform the
-validation directly:
+Use the same output schema as Step 4:
 
-1. Do an independent review of the diff, producing your own findings.
-2. For each finding from the primary reviewer, give a verdict:
-   - **CONFIRMED**: Agree this is a real issue. Briefly explain why.
-   - **FALSE_POSITIVE**: Not actually an issue. Explain why.
-   - **UNCERTAIN**: Arguments both ways. Explain the ambiguity.
+- severity: Critical / Improvement / Nitpick
+- file: <path>
+- location: <line or range>
+- title: <short title>
+- description: <explanation>
+- suggested_fix: <concrete remediation>
+- overall verdict: Approved or Request Changes
 
-Important: Complete the independent review FIRST before evaluating the
-primary reviewer's findings, to avoid anchoring bias.
+Use a distinct prompt/output path so the two reviews do not overwrite each
+other:
 
-#### If validator is a DIFFERENT LLM (external CLI)
+```bash
+PROMPT_FILE=$(mktemp /tmp/cross-review-reviewer-b-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-reviewer-b-result-XXXXXX)
+```
 
-Build the validation prompt following `llm-assist`'s review template,
-then append the cross-validation task:
+Monitor external CLIs with the same slow-is-not-hung rule from Step 4. If
+Reviewer B fails because the CLI is unavailable, auth is broken, or the process
+exits badly, present Reviewer A's review with a clear note that the comparative
+layer could not be completed. Do not fabricate a second review.
 
-1. **Common Header** — CLAUDE.md project conventions
-2. **Skill Preference** — code-reviewer detection preamble
-3. **Review Target** — the PR diff
-4. **Focus** — user-specified or general
-5. **Validation Task** (appended):
+### Step 6: Reciprocal Validation
+
+After both independent reviews are complete, cross-check findings in both
+directions.
+
+Reviewer A validates Reviewer B's findings:
+
+- If Reviewer A is YOU, evaluate each Reviewer B finding inline.
+- If Reviewer A is external, send Reviewer B's findings plus the PR diff back
+  to that LLM, along with Reviewer A's own independent review for context. Do
+  not ask it to redo the full independent review.
+
+Reviewer B validates Reviewer A's findings:
+
+- If Reviewer B is YOU, evaluate each Reviewer A finding inline.
+- If Reviewer B is external, send Reviewer A's findings plus the PR diff back
+  to that LLM, along with Reviewer B's own independent review for context. Do
+  not ask it to redo the full independent review.
+
+Validation prompt:
 
 ```markdown
-## Additional Task: Validate Another Reviewer's Findings
+## Task: Validate Another Reviewer's Findings
 
-After completing your independent review above, evaluate these findings
-from a separate reviewer. For EACH finding, give your verdict:
+You previously produced the independent review included below. Use it as
+context, but do not redo the full review. Now evaluate the findings from the
+other reviewer against the PR diff. For EACH finding, give your verdict:
 
 - **CONFIRMED**: You agree this is a real issue. Briefly explain why.
 - **FALSE_POSITIVE**: You believe this is not actually an issue. Explain why.
 - **UNCERTAIN**: You can see arguments both ways. Explain the ambiguity.
 
-Important: Complete your independent review FIRST. Do not let these findings
-influence your own review — they are a separate task.
+<your-independent-review>
+[Structured review previously produced by this same reviewer]
+</your-independent-review>
 
-<primary-findings>
-[Structured list of primary reviewer's findings, each with:
-severity, file, title, description]
-</primary-findings>
+<other-reviewer-findings>
+[Structured list of findings, each with severity, file, location, title,
+description, and suggested_fix]
+</other-reviewer-findings>
+
+<pr-diff>
+[contents of /tmp/cross-review-pr-diff.patch]
+</pr-diff>
 
 ### Validation Output Format
 
-For each finding from the primary reviewer:
-- finding: <primary reviewer's finding title>
+For each finding from the other reviewer:
+- finding: <finding title>
 - verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
 - reasoning: <your explanation>
 ```
 
-Run via the appropriate CLI for the `--to` LLM:
+Use distinct prompt/output paths for each direction:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-validator-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-validator-result-XXXXXX)
+PROMPT_FILE=$(mktemp /tmp/cross-review-validation-a-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-validation-a-result-XXXXXX)
 
-# Write assembled prompt to PROMPT_FILE
-
-# If --to is codex:
-codex exec -s read-only --ephemeral -o "$OUTPUT_FILE" - < "$PROMPT_FILE"
-
-# If --to is opencode:
-opencode run "Follow the instructions in the attached file" \
-  -f "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
-
-# If --to is claude (and you are NOT Claude):
-claude -p "Follow the instructions provided on stdin." \
-  --verbose \
-  --output-format stream-json \
-  --include-partial-messages \
-  < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>&1
+PROMPT_FILE=$(mktemp /tmp/cross-review-validation-b-XXXXXX)
+OUTPUT_FILE=$(mktemp /tmp/cross-review-validation-b-result-XXXXXX)
 ```
 
-Use the same monitoring rule as primary review for external validators: slow is
-not hung. Keep waiting while Claude Code, Codex, or OpenCode is making progress;
-if unsure, ask the user whether to wait or stop and provide elapsed time, output
-size, recent output summary, and process state.
+Run external validation through the same CLI command pattern and monitoring
+rules used for independent reviews in Step 4.
 
-#### Handle failure gracefully
+If either reverse-validation step fails, keep the available independent review
+and partial validation results, but label the missing validation explicitly in
+the final report.
 
-If the validator LLM fails (not installed, auth error, timeout), present
-the primary review alone with a note that cross-validation was unavailable.
-The primary review is still valuable on its own — the comparative layer is
-additive, not required.
+### Step 7: Synthesize Unified Report
 
-### Step 4: Synthesize unified report
+Read both independent reviews and both validation passes. Build the unified
+report by cross-referencing findings semantically.
 
-Read both reviews. Parse the validator's output into: independent findings
-list and validation verdicts. Then build the unified report by
-cross-referencing both reviews.
-
-Categorize every finding into one of five buckets:
+Categorize every finding into one of six buckets:
 
 | Category | Meaning | Confidence |
 |----------|---------|------------|
-| **Confirmed** | Both models found the same issue independently | High |
-| **Primary-only (validated)** | Primary found it, validator confirmed it | High |
-| **Primary-only (challenged)** | Primary found it, validator says false positive | Low - needs human judgment |
-| **Primary-only (uncertain)** | Primary found it, validator is unsure | Medium |
-| **Validator-only** | Validator found it, primary missed it | Medium |
+| **Confirmed independently** | Both models found the same issue independently | High |
+| **A-only, confirmed by B** | Reviewer A found it; Reviewer B did not find it independently but confirmed it during validation | High |
+| **B-only, confirmed by A** | Reviewer B found it; Reviewer A did not find it independently but confirmed it during validation | High |
+| **Challenged** | One reviewer found it; the other says false positive | Low - needs human judgment |
+| **Uncertain** | One reviewer found it; the other is unsure or validation is missing | Medium |
+| **Unvalidated** | Comparative validation failed for this finding | Medium-low |
 
-**Matching logic**: Two findings match if they reference the same file AND
-the same logical issue (even if described differently). Use semantic matching,
-not string equality — "missing null check on line 42" and "potential NPE in
-validateInput" are the same finding if they point to the same code.
+**Matching logic**: Two findings match if they reference the same file AND the
+same logical issue, even if described differently. Use semantic matching, not
+string equality.
 
 **Confidence score**: Calculate an overall score:
 
-```
-confirmed_weight = 1.0
-validated_weight = 0.8
+```text
+confirmed_independently_weight = 1.0
+confirmed_by_other_weight = 0.85
 uncertain_weight = 0.5
-validator_only_weight = 0.6
+unvalidated_weight = 0.4
 challenged_weight = 0.2
 
 score = weighted_sum / total_findings
 ```
 
-This isn't a pass/fail metric — it indicates how much agreement exists between
+This is not a pass/fail metric. It indicates how much agreement exists between
 the two models. A score above 0.7 means strong consensus; below 0.5 means
 significant disagreement worth investigating.
 
-### Step 5: Present the report
+### Step 8: Present The Report
 
 Display the unified report to the user:
 
 ```markdown
 # Comparative Review: PR #47
 
-**Primary reviewer**: [claude/codex/opencode] | **Validator**: [claude/codex/opencode]
-**Primary verdict**: [Approved / Request Changes]
-**Validator verdict**: [Approved / Request Changes]
+**Reviewer A**: [claude/codex/opencode]
+**Reviewer B**: [claude/codex/opencode]
+**Reviewer A verdict**: [Approved / Request Changes]
+**Reviewer B verdict**: [Approved / Request Changes]
 **Cross-model confidence**: [score as percentage]
 
-## Confirmed Issues (both models agree)
+## Confirmed Issues
 
-[For each confirmed finding:]
+[For each independently confirmed or cross-confirmed finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Primary reviewer**: [description]
-**Validator**: [description]
+**Reviewer A**: [description or validation reasoning]
+**Reviewer B**: [description or validation reasoning]
 **Suggested fix**: [best suggestion from either model]
 
-## Primary Findings — Validator Verdicts
+## Challenged Or Uncertain Findings
 
-[For each primary-only finding:]
+[For each challenged, uncertain, or unvalidated finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Description**: [primary reviewer's finding]
-**Validator verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN]
-**Validator reasoning**: [explanation]
-
-## Validator-Only Findings (primary missed)
-
-[For each validator-only finding:]
-### [severity] [title]
-**File**: [path]:[line]
-**Description**: [validator's finding]
+**Found by**: [Reviewer A / Reviewer B]
+**Description**: [finding]
+**Other reviewer verdict**: [FALSE_POSITIVE / UNCERTAIN / missing]
+**Reasoning**: [other reviewer reasoning when available]
 
 ## Summary
 
-[Narrative combining both perspectives. Highlight areas of agreement
-and disagreement. Call out any findings where the models disagree
-that the user should pay special attention to.]
+[Narrative combining both perspectives. Highlight agreement, disagreement,
+and any findings that need human judgment before acting.]
 ```
 
-### Step 5b: Regression tests for fixes
+### Step 9: Regression Tests For Fixes
 
 When the user asks to fix confirmed issues after the review, every bug fix
 must include a regression test that would have caught the original bug.
-This is non-negotiable — a fix without a test is incomplete.
+This is non-negotiable; a fix without a test is incomplete.
 
 For each fix, add a test that:
 1. Reproduces the invalid input or bad state that triggered the bug
@@ -449,11 +453,11 @@ For each fix, add a test that:
 
 Present a summary of added tests in the report so the user can verify coverage.
 
-### Step 6: Optional — Post as PR comment
+### Step 10: Optional Post As PR Comment
 
 If `--post` flag was provided, ask the user to confirm before posting:
 
-```
+```text
 Post this report as a comment on PR #47? (yes/no)
 ```
 
@@ -463,11 +467,12 @@ If confirmed:
 gh pr comment "$PR_NUM" --body-file /tmp/cross-review-report.md
 ```
 
-### Step 7: Clean up
+### Step 11: Clean Up
 
 ```bash
 rm -f /tmp/cross-review-pr-meta.json /tmp/cross-review-pr-diff.patch
-rm -f "$PROMPT_FILE" "$OUTPUT_FILE"
+rm -f /tmp/cross-review-reviewer-a-* /tmp/cross-review-reviewer-b-*
+rm -f /tmp/cross-review-validation-a-* /tmp/cross-review-validation-b-*
 ```
 
 Switch back to the previous branch:
@@ -492,8 +497,8 @@ and clearly label any fallback as a normal comparative review.
 |---------|----------|
 | `gh` not installed | Tell user to install GitHub CLI |
 | PR not found | Check PR number/URL and repo |
-| `--from` and `--to` are the same | Error: primary and validator must be different LLMs |
-| External LLM not installed | If it's the primary, abort with install instructions. If it's the validator, present primary review alone. |
+| `--from` and `--to` are the same | Error: the two reviewers must be different LLMs |
+| External LLM not installed | If an independent review cannot run, stop and report that comparative review is unavailable. If only reciprocal validation fails after both reviews completed, present both reviews and label missing validation clearly. |
 | External LLM appears slow | Monitor process/output. If progressing, keep waiting. If ambiguous, ask the user whether to wait or stop with elapsed time, output size, recent output summary, and process state. Applies to Claude Code, Codex, and OpenCode. |
 | External LLM timeout with no progress | Ask the user before killing unless the process clearly failed or they already instructed you to stop. If stopped, present partial output only if clearly marked incomplete. |
 | External LLM auth error | Tell user to check auth config for the selected provider |
@@ -509,7 +514,7 @@ and clearly label any fallback as a normal comparative review.
 - Different models excel at different things: Claude tends to catch architectural
   issues and convention violations; Codex often catches edge cases and
   off-by-one errors. Together they cover more ground.
-- Running `--from codex --to claude` is useful when you want Codex's review
-  validated by Claude's deeper architectural understanding.
-- Running `--from claude --to opencode` gives you a different second opinion
-  if Codex is unavailable.
+- Running `--from codex --to claude` starts with Codex's independent pass, then
+  has Claude independently review and cross-check it.
+- Running `--from claude --to opencode` pairs Claude with OpenCode when Codex is
+  unavailable or when a third implementation perspective is useful.

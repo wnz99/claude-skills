@@ -28,7 +28,8 @@ npx skills add wnz99/claude-skills/code-reviewer -g
 
 Or manually copy any `skills/<name>/` directory to your agent's skills
 directory, such as `~/.claude/skills/`, `~/.codex/skills/`, or
-`~/.agents/skills/`.
+`~/.agents/skills/`. OpenCode users can install manually under
+`~/.config/opencode/skills/`.
 
 ## Prerequisites
 
@@ -45,9 +46,9 @@ These skills are designed to complement each other:
 
 1. **code-reviewer** provides structured single-model review (correctness, security, maintainability, etc.)
 2. **llm-assist** adds cross-model validation by running analysis through a different LLM architecture (Codex or OpenCode)
-3. **cross-review-pr** orchestrates both: one LLM reviews first, then the other validates findings and adds its own, producing a unified report with confidence scores
+3. **cross-review-pr** orchestrates both: two LLMs review independently, then each validates the other's findings before producing a unified report with confidence scores
 
-**cross-review-pr** supports any combination of Claude, Codex, and OpenCode as primary reviewer or validator via `--from` / `--to` flags. The default is `--from claude --to codex`. Running `--from codex --to claude` reverses the roles — Codex reviews first, Claude validates.
+**cross-review-pr** supports any combination of Claude, Codex, and OpenCode as Reviewer A / Reviewer B via `--from` / `--to` flags. The default is `--from claude --to codex`. Running `--from codex --to claude` starts with Codex's independent review, then asks Claude for an independent review and reciprocal validation.
 
 The cross-model approach helps reduce sycophancy bias and can catch bugs that any single model might miss.
 
