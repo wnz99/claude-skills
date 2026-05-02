@@ -5,11 +5,14 @@
   "plugins": [
     {
       "name": "cross-model-review",
-      "description": "Cross-model code review, debugging, and validation skills using Claude, Codex, and OpenCode",
+      "description": "Cross-model review and clean-code refactoring skills for Claude, Codex, and OpenCode",
       "skills": [
         "skills/llm-assist",
         "skills/cross-review-pr",
-        "skills/code-reviewer"
+        "skills/code-reviewer",
+        "skills/clean-code-js",
+        "skills/clean-code-py",
+        "skills/clean-code-rust"
       ],
       "strict": false
     }
