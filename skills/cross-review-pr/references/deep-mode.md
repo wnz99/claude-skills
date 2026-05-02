@@ -3,9 +3,11 @@
 Use this reference when `cross-review-pr` is invoked with `--deep` or the user
 asks for a deep, multi-area, or parallel-agent review.
 
-Deep mode has one precise meaning: split the scope into focused review areas
-and run reviewer agents in parallel. Do not satisfy deep mode with one longer
-inline pass.
+Deep mode has one precise meaning: split the scope into focused review areas,
+run Reviewer A and Reviewer B independently on every area, validate findings
+area-by-area in both directions, then synthesize. Do not satisfy deep mode with
+one longer inline pass, one fanned-out reviewer plus one whole-scope pass, or
+area agents that optionally call a validator model.
 
 In hosts with restrictive delegation policy, "deep review" requests this
 workflow but may not be explicit permission to spawn sub-agents. If the host
@@ -92,8 +94,8 @@ test "$(wc -l < "$PROMPT_FILE")" -gt 50
 ```
 
 If a prompt is unexpectedly short or lacks source/diff markers, stop and
-regenerate it under a known shell, preferably `bash`. Do not launch primary or
-validator reviewers against empty or placeholder prompts.
+regenerate it under a known shell, preferably `bash`. Do not launch independent
+or validation reviewers against empty or placeholder prompts.
 
 ## D0b. Delegation Authorization
 
@@ -154,7 +156,7 @@ Area 2: storage and persistence
 Area 3: API contracts
 Area 4: background jobs
 Area 5: tests and fixtures
-Launching 5 parallel reviewer agents.
+Launching 10 parallel reviewer agents: 5 Reviewer A agents and 5 Reviewer B agents.
 ```
 
 ## D3. Extract Source-Of-Truth Context
@@ -172,17 +174,27 @@ Quote only the relevant excerpts in each area prompt. Do not paraphrase a spec
 into stricter requirements than it actually contains. If the spec is silent,
 say so explicitly.
 
-## D4. Launch Parallel Reviewers
+## D4. Launch Symmetric Parallel Reviewers
 
-Use the host agent's native parallel-agent mechanism. Each area prompt must be
-self-contained and must tell the reviewer that other agents are reviewing
-different areas.
+Use the host agent's native parallel-agent mechanism. For each area, launch one
+Reviewer A agent and one Reviewer B agent. Both reviewers receive the same
+area scope, file list, project rules, and spec excerpts, but neither receives
+the other reviewer's findings during the independent review pass.
+
+For N areas, strict deep mode launches 2N independent reviewer agents. Example:
+a six-area Claude <-> Codex review launches six Claude area reviewers and six
+Codex area reviewers. Do not replace this with one model fanned out by area
+while the other model performs one whole-PR pass or only validates.
+
+Each area prompt must be self-contained and must tell the reviewer that other
+agents are reviewing different areas.
 
 Prompt skeleton:
 
 ```markdown
-You are running an independent deep comparative review of one area of
-<project>. You are reviewing in parallel with other agents; only review your
+You are Reviewer <A-or-B> running an independent deep comparative review of one
+area of <project>. The paired Reviewer <B-or-A> will review the same area
+independently. Other reviewer pairs are reviewing other areas. Only review your
 assigned files.
 
 # Area
@@ -201,33 +213,53 @@ assigned files.
 # Task
 1. Review the assigned files for correctness, edge cases, security,
    integration bugs, and missing tests.
-2. If using an external validator model, build a prompt with the same file
-   list, project rules, and spec excerpts.
-3. Validate every external finding by reading the cited code yourself.
-4. Classify findings:
-   - CONFIRMED: real bug or regression
-   - STRAWMAN: model misread the spec or code
-   - DEBATABLE: real ambiguity or design choice
-5. For each CONFIRMED finding, identify whether an existing test would have
-   caught it.
+2. Do not ask another model to validate findings during this independent pass.
+3. Do not read or infer the paired reviewer's findings.
+4. For each finding, include severity, file:line, failure mode, concrete
+   evidence, suggested fix, and whether an existing test would catch it.
+5. End with an area verdict: Approved or Request Changes.
 
 # Output
 Return <=600 words:
 - reviewed area
-- findings table: severity / file:line / verdict / failure mode
+- reviewer: <A-or-B>
+- findings table: severity / file:line / failure mode / evidence / fix
 - missing regression tests
-- priority-ordered fixes
 - no-bug-found categories, if any
 ```
 
 Temp files must be unique per area. Do not let agents write to the same prompt
 or output path.
 
-## D5. Aggregate
+## D5. Reciprocal Area Validation
+
+After both independent reviews for an area complete, run reciprocal validation
+for that same area:
+
+1. Reviewer A validates Reviewer B's area findings against the same area scope.
+2. Reviewer B validates Reviewer A's area findings against the same area scope.
+3. The invoking agent records validation results before aggregating.
+
+Validation may be inline when the reviewer role matches the invoking agent, or
+through that reviewer's external CLI otherwise. The validating reviewer must
+receive its own independent review, the other reviewer's findings, and the same
+area context. It must not redo the full review.
+
+Validation output for each other-reviewer finding:
+
+- verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
+- reasoning: concrete code/spec evidence
+- missing test: yes / no / unclear
+
+Do not aggregate an area as complete until both independent reviews are done.
+If one validation direction fails, keep the independent reviews and successful
+validation, but label the missing validation explicitly.
+
+## D6. Aggregate
 
 As agents complete, show a one-line status per area: severity counts and
-CONFIRMED/DEBATABLE/STRAWMAN counts. Trust each agent's validated
-classification unless there is an obvious contradiction in the synthesis.
+validation counts: confirmed independently, A-only confirmed by B, B-only
+confirmed by A, challenged, uncertain, and unvalidated.
 
 If any area reviewer invokes an external CLI such as Claude Code or OpenCode,
 do not stop that process just because it is taking a long time. Monitor process
@@ -244,8 +276,9 @@ Master report:
 
 **Mode**: deep
 **Areas**: N
-**Primary/Validator**: <from> -> <to>
-**Total findings**: M (X CONFIRMED, Y DEBATABLE, Z STRAWMAN)
+**Reviewer A / Reviewer B**: <from> / <to>
+**Reviewer agents**: 2N independent area reviewers
+**Total findings**: M (X independently confirmed, Y cross-confirmed, Z challenged/uncertain/unvalidated)
 
 ## CONFIRMED - Worth Fixing
 
@@ -254,7 +287,9 @@ Master report:
 
 ## DEBATABLE - Human Judgment Needed
 
-## STRAWMAN - Filtered Out
+## CHALLENGED / UNCERTAIN / UNVALIDATED
+
+## FALSE POSITIVES - Filtered Out
 
 ## Missing Test Coverage
 
@@ -268,7 +303,11 @@ include a regression test that would have caught the original failure.
 
 - Paraphrasing specs into stricter requirements.
 - Giving identical generic prompts to every area.
-- Reporting unvalidated external-model findings.
+- Fanning out one reviewer by area while the other reviewer performs one
+  whole-scope pass or only validates.
+- Letting area reviewers optionally invoke external validators instead of
+  running symmetric independent Reviewer A and Reviewer B passes.
+- Reporting unvalidated external-model findings as confirmed.
 - Letting an area reviewer expand into unrelated files.
 - Re-running deep mode immediately after a fix when the original area reports
   are still applicable.

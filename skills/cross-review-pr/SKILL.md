@@ -136,10 +136,14 @@ trap cleanup_cross_review_tmpdir EXIT
 ### Step 2: Deep-Mode Delegation Authorization
 
 If `--deep` is active, read `references/deep-mode.md` before proceeding.
-Strict deep mode requires independent parallel reviewer agents. In environments
-that only allow sub-agents, delegation, or parallel agent work after explicit
-user authorization, a request like "deep review" or "deep comparative PR
-review" is not enough by itself.
+Strict deep mode requires symmetric independent parallel reviewer agents:
+Reviewer A and Reviewer B must each review every decomposed area independently,
+then validate each other's findings for that same area before synthesis. Do
+not satisfy deep mode by fanning out only one reviewer while the other performs
+one whole-PR pass or only validates. In environments that only allow
+sub-agents, delegation, or parallel agent work after explicit user
+authorization, a request like "deep review" or "deep comparative PR review" is
+not enough by itself.
 
 If explicit authorization is missing, stop and ask:
 
@@ -511,8 +515,11 @@ git checkout - 2>/dev/null || true
 ## Deep Mode
 
 Activated by `--deep` or by a request for a deep, multi-area, or
-parallel-agent review. Deep mode means focused parallel reviewer fanout, not
-one longer inline pass.
+parallel-agent review. Deep mode means symmetric focused parallel reviewer
+fanout: for each decomposed area, run Reviewer A and Reviewer B independently
+on the same scope, then validate findings area-by-area before the final
+synthesis. It is not one longer inline pass, one fanned-out model plus one
+whole-PR pass, or optional validator calls from area agents.
 
 Read `references/deep-mode.md` before running deep mode. If the current
 harness cannot launch parallel agents, say that strict deep mode is unavailable
