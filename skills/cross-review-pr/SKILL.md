@@ -121,6 +121,18 @@ If the prompt is unexpectedly short or lacks source/diff markers, stop and
 regenerate it under a known-safe shell before running Claude, Codex, or
 OpenCode. Do not launch reviewers against empty or placeholder prompts.
 
+Prompt files may contain proprietary source code. Before writing any prompt,
+metadata, or diff files, create a dedicated temporary directory per review and
+clean it up even when the workflow fails:
+
+```bash
+CROSS_REVIEW_TMPDIR=$(mktemp -d /tmp/cross-review-pr-XXXXXX)
+cleanup_cross_review_tmpdir() {
+  rm -rf "$CROSS_REVIEW_TMPDIR"
+}
+trap cleanup_cross_review_tmpdir EXIT
+```
+
 ### Step 2: Deep-Mode Delegation Authorization
 
 If `--deep` is active, read `references/deep-mode.md` before proceeding.
@@ -155,8 +167,8 @@ PR_NUM="<extracted number>"
 Fetch PR metadata and diff:
 
 ```bash
-gh pr view "$PR_NUM" --json title,body,baseRefName,headRefName,files > /tmp/cross-review-pr-meta.json
-gh pr diff "$PR_NUM" > /tmp/cross-review-pr-diff.patch
+gh pr view "$PR_NUM" --json title,body,baseRefName,headRefName,files > "$CROSS_REVIEW_TMPDIR/pr-meta.json"
+gh pr diff "$PR_NUM" > "$CROSS_REVIEW_TMPDIR/pr-diff.patch"
 ```
 
 Read the PR title, description, base branch, and changed file list from the
@@ -171,7 +183,8 @@ Mode: independent reviews + reciprocal validation
 ```
 
 If the diff exceeds 3000 lines, warn the user and suggest using `--focus`
-to narrow scope. Proceed anyway unless they stop you.
+to narrow scope. If it exceeds 5000 lines, split by file groups and run the
+workflow sequentially per group.
 
 ### Step 4: Reviewer A Independent Review
 
@@ -182,8 +195,17 @@ inline. Otherwise, shell out.
 If the reviewer is YOU, check out the PR branch so you have full file access:
 
 ```bash
+git status --short
+test -z "$(git status --short)" || {
+  printf '%s\n' "Working tree is dirty; inspect before checking out the PR."
+  exit 1
+}
 gh pr checkout "$PR_NUM"
 ```
+
+If the working tree is dirty, do not check out the PR branch until you have
+confirmed the changes are unrelated and checkout will not overwrite them. If
+checkout would disturb user changes, stop and ask the user how to proceed.
 
 If you have a `code-reviewer` skill installed, use that skill's workflow.
 Otherwise, review the diff directly. Produce a structured list where each
@@ -214,15 +236,15 @@ reviewer will catch issues. For each issue found, output:
 At the end, give an overall verdict: Approved or Request Changes.
 
 <pr-diff>
-[contents of /tmp/cross-review-pr-diff.patch]
+[contents of "$CROSS_REVIEW_TMPDIR/pr-diff.patch"]
 </pr-diff>
 ```
 
 Run via the appropriate CLI for the reviewer LLM:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-reviewer-a-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-reviewer-a-result-XXXXXX)
+PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/reviewer-a-prompt-XXXXXX")
+OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/reviewer-a-result-XXXXXX")
 
 # Write assembled prompt to PROMPT_FILE
 
@@ -287,8 +309,8 @@ Use a distinct prompt/output path so the two reviews do not overwrite each
 other:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-reviewer-b-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-reviewer-b-result-XXXXXX)
+PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/reviewer-b-prompt-XXXXXX")
+OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/reviewer-b-result-XXXXXX")
 ```
 
 Monitor external CLIs with the same slow-is-not-hung rule from Step 4. If
@@ -338,7 +360,7 @@ description, and suggested_fix]
 </other-reviewer-findings>
 
 <pr-diff>
-[contents of /tmp/cross-review-pr-diff.patch]
+[contents of "$CROSS_REVIEW_TMPDIR/pr-diff.patch"]
 </pr-diff>
 
 ### Validation Output Format
@@ -352,11 +374,11 @@ For each finding from the other reviewer:
 Use distinct prompt/output paths for each direction:
 
 ```bash
-PROMPT_FILE=$(mktemp /tmp/cross-review-validation-a-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-validation-a-result-XXXXXX)
+PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-prompt-XXXXXX")
+OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-result-XXXXXX")
 
-PROMPT_FILE=$(mktemp /tmp/cross-review-validation-b-XXXXXX)
-OUTPUT_FILE=$(mktemp /tmp/cross-review-validation-b-result-XXXXXX)
+PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-b-prompt-XXXXXX")
+OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-b-result-XXXXXX")
 ```
 
 Run external validation through the same CLI command pattern and monitoring
@@ -395,7 +417,14 @@ uncertain_weight = 0.5
 unvalidated_weight = 0.4
 challenged_weight = 0.2
 
-score = weighted_sum / total_findings
+weighted_sum =
+  confirmed_independently_count * confirmed_independently_weight
+  + confirmed_by_other_count * confirmed_by_other_weight
+  + uncertain_count * uncertain_weight
+  + unvalidated_count * unvalidated_weight
+  + challenged_count * challenged_weight
+
+score = weighted_sum / total_finding_count
 ```
 
 This is not a pass/fail metric. It indicates how much agreement exists between
@@ -470,9 +499,7 @@ gh pr comment "$PR_NUM" --body-file /tmp/cross-review-report.md
 ### Step 11: Clean Up
 
 ```bash
-rm -f /tmp/cross-review-pr-meta.json /tmp/cross-review-pr-diff.patch
-rm -f /tmp/cross-review-reviewer-a-* /tmp/cross-review-reviewer-b-*
-rm -f /tmp/cross-review-validation-a-* /tmp/cross-review-validation-b-*
+rm -rf "$CROSS_REVIEW_TMPDIR"
 ```
 
 Switch back to the previous branch:
@@ -502,7 +529,8 @@ and clearly label any fallback as a normal comparative review.
 | External LLM appears slow | Monitor process/output. If progressing, keep waiting. If ambiguous, ask the user whether to wait or stop with elapsed time, output size, recent output summary, and process state. Applies to Claude Code, Codex, and OpenCode. |
 | External LLM timeout with no progress | Ask the user before killing unless the process clearly failed or they already instructed you to stop. If stopped, present partial output only if clearly marked incomplete. |
 | External LLM auth error | Tell user to check auth config for the selected provider |
-| Diff too large (>5000 lines) | Split by file groups and run sequentially |
+| Diff too large (>3000 lines) | Warn the user and suggest `--focus`; above 5000 lines, split by file groups and run sequentially |
+| Dirty working tree before PR checkout | Stop before checkout if user changes could be disturbed; ask how to proceed |
 
 ## Tips
 
