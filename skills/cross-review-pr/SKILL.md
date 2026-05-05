@@ -1,15 +1,15 @@
 ---
 name: cross-review-pr
-description: "Cross-model comparative PR / Pull Request review of a PR, branch, commit, or codebase scope. Runs two LLMs through independent reviews and reciprocal validation, then synthesizes cross-checked findings. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative PR review, comparative review, PR cross-review, cross-review, dual review, cross-model review, validated review, second-opinion review, deep PR review, deep review, multi-area review, parallel-agent PR review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
+description: "Cross-model comparative PR / Pull Request review of a PR, branch, commit, or codebase scope. Runs two LLMs through independent reviews, has Reviewer A validate Reviewer B's findings only, then synthesizes overlap, A-only findings, and A-checked B-only findings. Default: Claude <-> Codex. Supports Claude, Codex, and OpenCode via --from/--to. Trigger for comparative PR review, comparative review, PR cross-review, cross-review, dual review, cross-model review, second-opinion review, deep PR review, deep review, multi-area review, parallel-agent PR review, or when the user wants two LLMs to review a PR together. Deep review requires explicit permission to spawn sub-agents/parallel agents where the host policy requires it; see references/deep-mode.md."
 ---
 
 # Cross-Review PR
 
 Run a comparative code review on a Pull Request using two independent models.
-The value is in reciprocal cross-validation: each model reviews independently,
-then checks the other model's findings. Issues found or confirmed by both
-models are high-confidence, while single-model findings get scrutinized for
-false positives before the final report.
+The value is in independent coverage: each model reviews the same change
+without seeing the other's findings. After both independent reviews complete,
+Reviewer A validates Reviewer B's findings only. Do not send Reviewer A's
+findings to Reviewer B unless the user explicitly asks for that extra step.
 
 ## Supported LLMs
 
@@ -27,8 +27,9 @@ out to an external CLI.
 
 - If you are **Claude**: `claude` roles run inline (use `code-reviewer` skill
   or direct analysis). `codex` and `opencode` roles shell out via their CLIs.
-- If you are **Codex**: `codex` roles run inline (do the review and validation
-  yourself). `claude` and `opencode` roles shell out via their CLIs.
+- If you are **Codex**: `codex` roles run inline (do the review yourself, and
+  do the one-way validation yourself when Codex is Reviewer A). `claude` and
+  `opencode` roles shell out via their CLIs.
 - If you are **OpenCode**: `opencode` roles run inline. `claude` and `codex`
   roles shell out via their CLIs.
 
@@ -51,8 +52,7 @@ If the role is a *different* LLM, you invoke it via its CLI.
   (`src/`), or omitted (review the entire `src/` tree).
 - **--from REVIEWER_A** (optional): LLM that performs the first independent review.
   Values: `claude` (default), `codex`, `opencode`.
-- **--to REVIEWER_B** (optional): LLM that performs the second independent review
-  and participates in reciprocal validation.
+- **--to REVIEWER_B** (optional): LLM that performs the second independent review.
   Values: `codex` (default), `claude`, `opencode`.
 - **--focus AREA** (optional): Narrow both reviews to a specific area
   (security, performance, concurrency, error-handling). Default: general review.
@@ -138,9 +138,10 @@ trap cleanup_cross_review_tmpdir EXIT
 If `--deep` is active, read `references/deep-mode.md` before proceeding.
 Strict deep mode requires symmetric independent parallel reviewer agents:
 Reviewer A and Reviewer B must each review every decomposed area independently,
-then validate each other's findings for that same area before synthesis. Do
-not satisfy deep mode by fanning out only one reviewer while the other performs
-one whole-PR pass or only validates. In environments that only allow
+then Reviewer A validates Reviewer B's findings for that area. Do not satisfy
+deep mode by fanning out only one reviewer while the other performs one
+whole-PR pass or only validates.
+In environments that only allow
 sub-agents, delegation, or parallel agent work after explicit user
 authorization, a request like "deep review" or "deep comparative PR review" is
 not enough by itself.
@@ -156,9 +157,9 @@ To avoid this checkpoint, the user can explicitly request strict deep mode with
 phrases like "deep parallel-agent review", "spawn parallel reviewer
 sub-agents", or "`--deep` with sub-agents".
 
-Do not silently fall back to one inline pass, local-only validation, or only
-external CLI processes. If the user declines sub-agents, ask whether they want
-a non-deep comparative fallback and label that fallback clearly.
+Do not silently fall back to one inline pass or only external CLI processes. If
+the user declines sub-agents, ask whether they want a non-deep comparative
+fallback and label that fallback clearly.
 
 ### Step 3: Gather PR Context
 
@@ -183,7 +184,7 @@ Comparative review: PR #47 — "feat(27): backpressure pipeline"
 Base: develop <- gsd/phase-27-backpressure-frame-dropping
 Files changed: 12
 Reviewer A: claude | Reviewer B: codex
-Mode: independent reviews + reciprocal validation
+Mode: independent reviews + Reviewer A validates Reviewer B findings + synthesis
 ```
 
 If the diff exceeds 3000 lines, warn the user and suggest using `--focus`
@@ -288,15 +289,15 @@ or the user explicitly instructs you to stop it.
 Parse the output into the same structured findings format.
 If Reviewer A fails because the CLI is unavailable, auth is broken, or the
 process exits badly, stop the comparative workflow and report the failure. Do
-not continue to reciprocal validation with only one completed review.
+not synthesize a comparative report from only one completed review.
 
 ### Step 5: Reviewer B Independent Review
 
 Run the second independent review using whichever LLM is selected via `--to`.
 Apply the **self-awareness rule** exactly as in Step 4.
 
-Reviewer B must not receive Reviewer A's findings yet. Give it the same PR
-metadata, project conventions, focus, and diff, but no cross-validation task.
+Reviewer B must not receive Reviewer A's findings. Give it the same PR
+metadata, project conventions, focus, and diff, but no prior findings.
 This preserves independence and avoids anchoring.
 
 Use the same output schema as Step 4:
@@ -322,46 +323,38 @@ Reviewer B fails because the CLI is unavailable, auth is broken, or the process
 exits badly, present Reviewer A's review with a clear note that the comparative
 layer could not be completed. Do not fabricate a second review.
 
-### Step 6: Reciprocal Validation
+### Step 6: Reviewer A Validates Reviewer B Findings
 
-After both independent reviews are complete, cross-check findings in both
-directions.
+After both independent reviews are complete, have Reviewer A evaluate Reviewer
+B's findings against the PR diff. This is one-way only: do not ask Reviewer B
+to evaluate Reviewer A's findings.
 
-Reviewer A validates Reviewer B's findings:
-
-- If Reviewer A is YOU, evaluate each Reviewer B finding inline.
+- If Reviewer A is YOU, evaluate Reviewer B's findings inline.
 - If Reviewer A is external, send Reviewer B's findings plus the PR diff back
-  to that LLM, along with Reviewer A's own independent review for context. Do
-  not ask it to redo the full independent review.
-
-Reviewer B validates Reviewer A's findings:
-
-- If Reviewer B is YOU, evaluate each Reviewer A finding inline.
-- If Reviewer B is external, send Reviewer A's findings plus the PR diff back
-  to that LLM, along with Reviewer B's own independent review for context. Do
+  to Reviewer A, along with Reviewer A's independent review for context. Do
   not ask it to redo the full independent review.
 
 Validation prompt:
 
 ```markdown
-## Task: Validate Another Reviewer's Findings
+## Task: Validate Reviewer B's Findings
 
 You previously produced the independent review included below. Use it as
-context, but do not redo the full review. Now evaluate the findings from the
-other reviewer against the PR diff. For EACH finding, give your verdict:
+context, but do not redo the full review. Now evaluate Reviewer B's findings
+against the PR diff. For EACH Reviewer B finding, give your verdict:
 
 - **CONFIRMED**: You agree this is a real issue. Briefly explain why.
 - **FALSE_POSITIVE**: You believe this is not actually an issue. Explain why.
 - **UNCERTAIN**: You can see arguments both ways. Explain the ambiguity.
 
-<your-independent-review>
-[Structured review previously produced by this same reviewer]
-</your-independent-review>
+<reviewer-a-independent-review>
+[Structured review previously produced by Reviewer A]
+</reviewer-a-independent-review>
 
-<other-reviewer-findings>
-[Structured list of findings, each with severity, file, location, title,
-description, and suggested_fix]
-</other-reviewer-findings>
+<reviewer-b-findings>
+[Structured list of Reviewer B findings, each with severity, file, location,
+title, description, and suggested_fix]
+</reviewer-b-findings>
 
 <pr-diff>
 [contents of "$CROSS_REVIEW_TMPDIR/pr-diff.patch"]
@@ -369,71 +362,47 @@ description, and suggested_fix]
 
 ### Validation Output Format
 
-For each finding from the other reviewer:
+For each Reviewer B finding:
 - finding: <finding title>
 - verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
 - reasoning: <your explanation>
 ```
 
-Use distinct prompt/output paths for each direction:
+Use a distinct prompt/output path:
 
 ```bash
-PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-prompt-XXXXXX")
-OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-result-XXXXXX")
-
-PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-b-prompt-XXXXXX")
-OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-b-result-XXXXXX")
+PROMPT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-checks-b-prompt-XXXXXX")
+OUTPUT_FILE=$(mktemp "$CROSS_REVIEW_TMPDIR/validation-a-checks-b-result-XXXXXX")
 ```
 
 Run external validation through the same CLI command pattern and monitoring
 rules used for independent reviews in Step 4.
 
-If either reverse-validation step fails, keep the available independent review
-and partial validation results, but label the missing validation explicitly in
-the final report.
+If Reviewer A validation fails, keep both independent reviews and label
+Reviewer B-only findings as not checked by Reviewer A.
 
 ### Step 7: Synthesize Unified Report
 
-Read both independent reviews and both validation passes. Build the unified
-report by cross-referencing findings semantically.
+Read both independent reviews and Reviewer A's validation of Reviewer B's
+findings. Build the unified report by cross-referencing findings semantically.
 
-Categorize every finding into one of six buckets:
+Categorize every finding into one of five buckets:
 
-| Category | Meaning | Confidence |
-|----------|---------|------------|
-| **Confirmed independently** | Both models found the same issue independently | High |
-| **A-only, confirmed by B** | Reviewer A found it; Reviewer B did not find it independently but confirmed it during validation | High |
-| **B-only, confirmed by A** | Reviewer B found it; Reviewer A did not find it independently but confirmed it during validation | High |
-| **Challenged** | One reviewer found it; the other says false positive | Low - needs human judgment |
-| **Uncertain** | One reviewer found it; the other is unsure or validation is missing | Medium |
-| **Unvalidated** | Comparative validation failed for this finding | Medium-low |
+| Category | Meaning |
+|----------|---------|
+| **Found by both** | Both models found the same logical issue independently |
+| **Reviewer A only** | Reviewer A found it; Reviewer B did not mention the same issue |
+| **Reviewer B only, confirmed by A** | Reviewer B found it; Reviewer A did not find it independently but agrees it is real |
+| **Reviewer B only, challenged by A** | Reviewer B found it; Reviewer A says it is false positive or uncertain |
+| **Conflicting or debatable** | The reviews directly disagree, or one finding depends on an ambiguous requirement |
 
 **Matching logic**: Two findings match if they reference the same file AND the
 same logical issue, even if described differently. Use semantic matching, not
 string equality.
 
-**Confidence score**: Calculate an overall score:
-
-```text
-confirmed_independently_weight = 1.0
-confirmed_by_other_weight = 0.85
-uncertain_weight = 0.5
-unvalidated_weight = 0.4
-challenged_weight = 0.2
-
-weighted_sum =
-  confirmed_independently_count * confirmed_independently_weight
-  + confirmed_by_other_count * confirmed_by_other_weight
-  + uncertain_count * uncertain_weight
-  + unvalidated_count * unvalidated_weight
-  + challenged_count * challenged_weight
-
-score = weighted_sum / total_finding_count
-```
-
-This is not a pass/fail metric. It indicates how much agreement exists between
-the two models. A score above 0.7 means strong consensus; below 0.5 means
-significant disagreement worth investigating.
+Treat overlap and A-confirmed B-only findings as stronger evidence. Reviewer
+A-only findings are not checked by Reviewer B in this simplified flow, so
+present them without claiming cross-model confirmation.
 
 ### Step 8: Present The Report
 
@@ -446,36 +415,47 @@ Display the unified report to the user:
 **Reviewer B**: [claude/codex/opencode]
 **Reviewer A verdict**: [Approved / Request Changes]
 **Reviewer B verdict**: [Approved / Request Changes]
-**Cross-model confidence**: [score as percentage]
+**Agreement**: [N found by both, A-only count, B-only confirmed by A count, B-only challenged/uncertain count]
 
-## Confirmed Issues
+## Found By Both Reviewers
 
-[For each independently confirmed or cross-confirmed finding:]
+[For each overlapping finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Reviewer A**: [description or validation reasoning]
-**Reviewer B**: [description or validation reasoning]
+**Reviewer A**: [description]
+**Reviewer B**: [description]
 **Suggested fix**: [best suggestion from either model]
 
-## Challenged Or Uncertain Findings
+## Reviewer A-Only Findings
 
-[For each challenged, uncertain, or unvalidated finding:]
+[For each A-only finding:]
 ### [severity] [title]
 **File**: [path]:[line]
-**Found by**: [Reviewer A / Reviewer B]
 **Description**: [finding]
-**Other reviewer verdict**: [FALSE_POSITIVE / UNCERTAIN / missing]
-**Reasoning**: [other reviewer reasoning when available]
+
+## Reviewer B Findings Checked By Reviewer A
+
+[For each B-only finding:]
+### [severity] [title]
+**File**: [path]:[line]
+**Reviewer B**: [finding]
+**Reviewer A verdict**: [CONFIRMED / FALSE_POSITIVE / UNCERTAIN / not checked]
+**Reviewer A reasoning**: [reasoning when available]
+
+## Conflicting Or Debatable Findings
+
+[For findings where the two reviews directly disagree or depend on ambiguous requirements.]
 
 ## Summary
 
-[Narrative combining both perspectives. Highlight agreement, disagreement,
-and any findings that need human judgment before acting.]
+[Narrative combining both perspectives. Highlight overlap, Reviewer A-only
+coverage, Reviewer B findings checked by Reviewer A, and findings needing
+human judgment before acting.]
 ```
 
 ### Step 9: Regression Tests For Fixes
 
-When the user asks to fix confirmed issues after the review, every bug fix
+When the user asks to fix reported issues after the review, every bug fix
 must include a regression test that would have caught the original bug.
 This is non-negotiable; a fix without a test is incomplete.
 
@@ -517,9 +497,9 @@ git checkout - 2>/dev/null || true
 Activated by `--deep` or by a request for a deep, multi-area, or
 parallel-agent review. Deep mode means symmetric focused parallel reviewer
 fanout: for each decomposed area, run Reviewer A and Reviewer B independently
-on the same scope, then validate findings area-by-area before the final
-synthesis. It is not one longer inline pass, one fanned-out model plus one
-whole-PR pass, or optional validator calls from area agents.
+on the same scope, then have Reviewer A validate Reviewer B's findings for
+that area. It is not one longer inline pass, one fanned-out model plus one
+whole-PR pass, or Reviewer B validating Reviewer A.
 
 Read `references/deep-mode.md` before running deep mode. If the current
 harness cannot launch parallel agents, say that strict deep mode is unavailable
@@ -532,7 +512,7 @@ and clearly label any fallback as a normal comparative review.
 | `gh` not installed | Tell user to install GitHub CLI |
 | PR not found | Check PR number/URL and repo |
 | `--from` and `--to` are the same | Error: the two reviewers must be different LLMs |
-| External LLM not installed | If an independent review cannot run, stop and report that comparative review is unavailable. If only reciprocal validation fails after both reviews completed, present both reviews and label missing validation clearly. |
+| External LLM not installed | If an independent review cannot run, stop and report that comparative review is unavailable. If Reviewer A validation of Reviewer B fails after both reviews complete, present both reviews and label B-only findings as not checked by A. |
 | External LLM appears slow | Monitor process/output. If progressing, keep waiting. If ambiguous, ask the user whether to wait or stop with elapsed time, output size, recent output summary, and process state. Applies to Claude Code, Codex, and OpenCode. |
 | External LLM timeout with no progress | Ask the user before killing unless the process clearly failed or they already instructed you to stop. If stopped, present partial output only if clearly marked incomplete. |
 | External LLM auth error | Tell user to check auth config for the selected provider |
@@ -550,6 +530,6 @@ and clearly label any fallback as a normal comparative review.
   issues and convention violations; Codex often catches edge cases and
   off-by-one errors. Together they cover more ground.
 - Running `--from codex --to claude` starts with Codex's independent pass, then
-  has Claude independently review and cross-check it.
+  has Claude independently review the same scope.
 - Running `--from claude --to opencode` pairs Claude with OpenCode when Codex is
   unavailable or when a third implementation perspective is useful.

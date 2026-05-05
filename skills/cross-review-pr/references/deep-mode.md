@@ -4,16 +4,16 @@ Use this reference when `cross-review-pr` is invoked with `--deep` or the user
 asks for a deep, multi-area, or parallel-agent review.
 
 Deep mode has one precise meaning: split the scope into focused review areas,
-run Reviewer A and Reviewer B independently on every area, validate findings
-area-by-area in both directions, then synthesize. Do not satisfy deep mode with
-one longer inline pass, one fanned-out reviewer plus one whole-scope pass, or
-area agents that optionally call a validator model.
+run Reviewer A and Reviewer B independently on every area, then have Reviewer A
+validate Reviewer B's findings for each area. Do not satisfy deep mode with one
+longer inline pass, one fanned-out reviewer plus one whole-scope pass, or
+Reviewer B validating Reviewer A.
 
 In hosts with restrictive delegation policy, "deep review" requests this
 workflow but may not be explicit permission to spawn sub-agents. If the host
 requires explicit permission for sub-agents, delegation, or parallel agent
 work, ask for that permission before spawning. Do not silently use a fallback
-such as external processes plus one local validation pass.
+such as external processes plus one local-only pass.
 
 If the current harness cannot launch parallel agents, or if the user declines
 sub-agents, say that strict deep mode is unavailable and ask whether to run a
@@ -94,8 +94,8 @@ test "$(wc -l < "$PROMPT_FILE")" -gt 50
 ```
 
 If a prompt is unexpectedly short or lacks source/diff markers, stop and
-regenerate it under a known shell, preferably `bash`. Do not launch independent
-or validation reviewers against empty or placeholder prompts.
+regenerate it under a known shell, preferably `bash`. Do not launch reviewers
+against empty or placeholder prompts.
 
 ## D0b. Delegation Authorization
 
@@ -213,11 +213,10 @@ assigned files.
 # Task
 1. Review the assigned files for correctness, edge cases, security,
    integration bugs, and missing tests.
-2. Do not ask another model to validate findings during this independent pass.
-3. Do not read or infer the paired reviewer's findings.
-4. For each finding, include severity, file:line, failure mode, concrete
+2. Do not read or infer the paired reviewer's findings.
+3. For each finding, include severity, file:line, failure mode, concrete
    evidence, suggested fix, and whether an existing test would catch it.
-5. End with an area verdict: Approved or Request Changes.
+4. End with an area verdict: Approved or Request Changes.
 
 # Output
 Return <=600 words:
@@ -231,35 +230,48 @@ Return <=600 words:
 Temp files must be unique per area. Do not let agents write to the same prompt
 or output path.
 
-## D5. Reciprocal Area Validation
+## D5. Reviewer A Validates Reviewer B
 
-After both independent reviews for an area complete, run reciprocal validation
-for that same area:
+After both independent reviews for an area complete, have Reviewer A evaluate
+Reviewer B's findings for that area. This is one-way only: do not ask Reviewer
+B to evaluate Reviewer A's findings.
 
-1. Reviewer A validates Reviewer B's area findings against the same area scope.
-2. Reviewer B validates Reviewer A's area findings against the same area scope.
-3. The invoking agent records validation results before aggregating.
+Validation may be inline when Reviewer A matches the invoking agent, or through
+Reviewer A's external CLI otherwise. The validating reviewer receives its own
+independent review, Reviewer B's findings, and the same area context. It must
+not redo the full review.
 
-Validation may be inline when the reviewer role matches the invoking agent, or
-through that reviewer's external CLI otherwise. The validating reviewer must
-receive its own independent review, the other reviewer's findings, and the same
-area context. It must not redo the full review.
-
-Validation output for each other-reviewer finding:
+Validation output for each Reviewer B finding:
 
 - verdict: CONFIRMED / FALSE_POSITIVE / UNCERTAIN
 - reasoning: concrete code/spec evidence
 - missing test: yes / no / unclear
 
-Do not aggregate an area as complete until both independent reviews are done.
-If one validation direction fails, keep the independent reviews and successful
-validation, but label the missing validation explicitly.
+If Reviewer A validation fails, keep both independent reviews and mark B-only
+findings as not checked by A.
 
-## D6. Aggregate
+## D6. Area Synthesis
+
+For each area, synthesize the independent reviews and Reviewer A's validation
+of Reviewer B's findings.
+
+For each area, group findings into:
+
+- found by both reviewers
+- Reviewer A only
+- Reviewer B only, confirmed by A
+- Reviewer B only, challenged or uncertain by A
+- conflicting or debatable
+
+Do not aggregate an area as complete until both independent reviews are done.
+Treat overlap and A-confirmed B-only findings as stronger evidence. Reviewer
+A-only findings are not checked by Reviewer B in this simplified flow.
+
+## D7. Aggregate
 
 As agents complete, show a one-line status per area: severity counts and
-validation counts: confirmed independently, A-only confirmed by B, B-only
-confirmed by A, challenged, uncertain, and unvalidated.
+agreement counts: found by both, Reviewer A only, Reviewer B only confirmed by
+A, Reviewer B only challenged/uncertain by A, and conflicting/debatable.
 
 If any area reviewer invokes an external CLI such as Claude Code or OpenCode,
 do not stop that process just because it is taking a long time. Monitor process
@@ -278,25 +290,26 @@ Master report:
 **Areas**: N
 **Reviewer A / Reviewer B**: <from> / <to>
 **Reviewer agents**: 2N independent area reviewers
-**Total findings**: M (X independently confirmed, Y cross-confirmed, Z challenged/uncertain/unvalidated)
+**Total findings**: M (X found by both, Y Reviewer A only, Z Reviewer B only confirmed by A, W challenged/debatable)
 
-## CONFIRMED - Worth Fixing
+## FOUND BY BOTH - Highest Confidence
 
 | # | Sev | Area | File | Bug | Fix | Missing test? |
 |---|-----|------|------|-----|-----|---------------|
 
-## DEBATABLE - Human Judgment Needed
+## REVIEWER A-ONLY FINDINGS
 
-## CHALLENGED / UNCERTAIN / UNVALIDATED
+## REVIEWER B FINDINGS CHECKED BY REVIEWER A
 
-## FALSE POSITIVES - Filtered Out
+## CONFLICTING OR DEBATABLE
 
 ## Missing Test Coverage
 
-## Areas With No Confirmed Bugs
+## Areas With No Reported Bugs
+
 ```
 
-End by asking whether to implement the confirmed fixes. Every bug fix should
+End by asking whether to implement the selected fixes. Every bug fix should
 include a regression test that would have caught the original failure.
 
 ## Anti-Patterns
@@ -305,9 +318,9 @@ include a regression test that would have caught the original failure.
 - Giving identical generic prompts to every area.
 - Fanning out one reviewer by area while the other reviewer performs one
   whole-scope pass or only validates.
-- Letting area reviewers optionally invoke external validators instead of
-  running symmetric independent Reviewer A and Reviewer B passes.
-- Reporting unvalidated external-model findings as confirmed.
+- Asking Reviewer B to validate Reviewer A's findings unless the user
+  explicitly asks for reciprocal validation.
+- Reporting Reviewer A-only findings as checked by Reviewer B.
 - Letting an area reviewer expand into unrelated files.
 - Re-running deep mode immediately after a fix when the original area reports
   are still applicable.
