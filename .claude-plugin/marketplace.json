@@ -12,7 +12,8 @@
         "skills/code-reviewer",
         "skills/clean-code-js",
         "skills/clean-code-py",
-        "skills/clean-code-rust"
+        "skills/clean-code-rust",
+        "skills/phased-implementation-review-loop"
       ],
       "strict": false
     }
