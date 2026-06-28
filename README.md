@@ -13,6 +13,7 @@ A collection of Agent Skills for cross-model code review, debugging, validation,
 | [clean-code-py](skills/clean-code-py/) | Focused Python readability, API clarity, and maintainability refactoring guidance |
 | [clean-code-rust](skills/clean-code-rust/) | Focused Rust readability, ownership, error-handling, and API maintainability guidance |
 | [doc-review](skills/doc-review/) | Audit and refresh an existing documentation file (runbook, README, AGENTS.md, ADR, etc.) against the live codebase, with an evidence-backed report before any edits |
+| [phased-implementation-review-loop](skills/phased-implementation-review-loop/) | Plan a multi-step change, then implement each step under a verify → in-code review → independent cross-model sub-agent review loop, fixing until no High/Medium findings remain before advancing |
 
 ## Install
 
@@ -32,6 +33,7 @@ npx skills add wnz99/claude-skills/clean-code-js -g
 npx skills add wnz99/claude-skills/clean-code-py -g
 npx skills add wnz99/claude-skills/clean-code-rust -g
 npx skills add wnz99/claude-skills/doc-review -g
+npx skills add wnz99/claude-skills/phased-implementation-review-loop -g
 ```
 
 Or manually copy any `skills/<name>/` directory to your agent's skills
