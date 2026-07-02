@@ -94,12 +94,23 @@ If a PR already exists, update it instead of creating a duplicate.
 #### B. Run Review Loops
 
 Each loop has four phases: spawn independent review, post comments, fix, verify.
+Every review loop must use a fresh reviewer context and the reviewer
+command/model policy below, including loops run after pushed fixes.
 
 1.  **Spawn independent sub-agent reviewers**
     *   Start from fresh context. The reviewer should see the repository, the PR
         diff, and the review instructions, not the authoring agent's reasoning.
-    *   In repositories that specify a reviewer model or sub-agent policy, follow
-        it exactly.
+    *   Select the reviewer sub-agent command for the active host:
+        `multi_agent_v1.spawn_agent` for Codex/OpenAI when available, or the
+        host's equivalent sub-agent command for Anthropic.
+    *   Use an explicit reviewer model override: Codex/OpenAI reviewers use
+        `gpt-5.4` with medium reasoning, and Anthropic reviewers use Sonnet 5.
+        For Codex/OpenAI, pass `model: "gpt-5.4"` and
+        `reasoning_effort: "medium"` when the sub-agent tool accepts those
+        fields.
+    *   Include the `code-reviewer` skill in the reviewer prompt or input items.
+    *   Also follow any repository-specific review policy that does not
+        conflict with this skill's reviewer command/model requirements.
     *   Ask each reviewer to classify findings as High, Medium, Low, or Nit.
         High and Medium are blocking. Low and Nit are optional unless the user
         explicitly says otherwise.
@@ -109,8 +120,10 @@ Each loop has four phases: spawn independent review, post comments, fix, verify.
 2.  **Post a PR comment for every loop**
     *   Post one top-level PR comment per loop, even when the loop finds no
         blocking issues.
-    *   Include the loop number, reviewer identity/model when available,
-        verification commands run, and a severity summary.
+    *   Include the loop number, reviewer identity, reviewer model, verification
+        commands run, and a severity summary. If the host does not expose the
+        exact model name, state the requested model from the reviewer
+        command/model policy.
     *   For every High/Medium finding, include the file/line, impact, and planned
         resolution. If using inline review comments is practical, prefer inline
         comments for concrete code findings and still post the loop summary.
@@ -129,8 +142,8 @@ Each loop has four phases: spawn independent review, post comments, fix, verify.
 4.  **Verify and push**
     *   Rerun focused tests/checks relevant to the fixes.
     *   Commit and push fixes to the same PR.
-    *   Start another loop after the push if any High/Medium finding was fixed,
-        disputed, or newly introduced.
+    *   Start another fresh-context review loop after the push if any
+        High/Medium finding was fixed, disputed, or newly introduced.
 
 #### C. Stopping Criteria
 
